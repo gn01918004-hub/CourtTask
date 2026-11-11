@@ -13,10 +13,42 @@
 (function (global) {
   'use strict';
 
+  /* 字串編碼：舊版 SVMAP 存 Big5（結尾一個 0），新版存 Unicode UTF-16LE（結尾兩個 0、長度為偶數）。
+     兩種版本的檔頭相同，所以逐個字串判斷。 */
+  var UNICODE_SEEN = false;
+  function isUtf16(bytes) {
+    var n = bytes.length;
+    if (n < 2 || n % 2) return false;
+    if (bytes[n - 1] !== 0 || bytes[n - 2] !== 0) return false;
+    if (n === 2) return UNICODE_SEEN;          // 空字串
+    // ASCII 字元在 UTF-16 會出現「字元, 0」；Big5 字串中間不會有 0
+    for (var i = 1; i < n - 2; i += 2) if (bytes[i] === 0 && bytes[i - 1] !== 0) return true;
+    // 全中文：UTF-16 的每個字落在常用範圍
+    for (var j = 0; j + 1 < n - 2; j += 2) { var c = bytes[j] | (bytes[j + 1] << 8); if (!(c >= 0x2000 && c < 0xFFF0)) return false; }
+    return true;
+  }
+  /* 圖層名稱：固定長度欄位、後面補 0；ASCII / UTF-8 / Big5，若為「字,0,字,0」則為 UTF-16 */
+  function decodeName(bytes) {
+    if (bytes.length > 3 && bytes[1] === 0 && bytes[0] !== 0 && bytes[3] === 0 && bytes[2] !== 0) {
+      var e = bytes.length;
+      for (var i = 0; i + 1 < bytes.length; i += 2) if (bytes[i] === 0 && bytes[i + 1] === 0) { e = i; break; }
+      return new TextDecoder('utf-16le').decode(bytes.subarray(0, e));
+    }
+    var end = bytes.indexOf(0); if (end >= 0) bytes = bytes.subarray(0, end);
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (x) {
+      try { return new TextDecoder('big5').decode(bytes); } catch (y) { return ''; }
+    }
+  }
   function decodeStr(bytes) {
+    if (isUtf16(bytes)) {
+      UNICODE_SEEN = true;
+      var e2 = bytes.length;
+      for (var i = 0; i + 1 < bytes.length; i += 2) if (bytes[i] === 0 && bytes[i + 1] === 0) { e2 = i; break; }
+      return new TextDecoder('utf-16le').decode(bytes.subarray(0, e2));
+    }
     var end = bytes.indexOf(0); if (end >= 0) bytes = bytes.subarray(0, end);
     try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) {
-      try { return new TextDecoder('big5').decode(bytes); } catch (e2) { return ''; }
+      try { return new TextDecoder('big5').decode(bytes); } catch (e3) { return ''; }
     }
   }
 
@@ -130,6 +162,7 @@
   function parse(buf) {
     var u8 = new Uint8Array(buf), r = new Reader(u8);
     if (u8.length < 110 || String.fromCharCode(u8[0], u8[1], u8[2], u8[3]) !== '##%%') throw new Error('不是 SVMAP .m02 檔案');
+    UNICODE_SEEN = false;
     var groups = [], g = null, i = 100, unknown = {};
     while (i + 10 <= u8.length) {
       if (u8[i] !== 0x40 || u8[i + 1] !== 0x40) throw new Error('檔案格式不符（位置 ' + i + '）');
@@ -140,7 +173,7 @@
         g = { x0: dr.f64(4), y0: dr.f64(12), w: dr.f64(20), h: dr.f64(28), scale: dr.f64(36), layers: [], elems: [] };
         groups.push(g);
       } else if (type === 5100 && g) {
-        g.layers[dr.u16(12)] = decodeStr(d.subarray(16));
+        g.layers[dr.u16(12)] = decodeName(d.subarray(16));
       } else if (type === 5101 && g && d.length >= 52) {
         g.view = [dr.f64(4), dr.f64(12), dr.f64(20), dr.f64(28), dr.f64(36)];
       } else if (type !== 5006 && type !== 5999 && g) {
@@ -150,7 +183,7 @@
       }
       i += 2 + len;
     }
-    return { groups: groups, unknown: unknown };
+    return { groups: groups, unknown: unknown, unicode: UNICODE_SEEN };
   }
 
   /* 攤平群組／圖塊 */

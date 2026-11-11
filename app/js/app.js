@@ -434,6 +434,11 @@
     handlesOf(R.bounds(el, App.P)).forEach(function (q) { if (Math.abs(p[0] - q[1]) < h && Math.abs(p[1] - q[2]) < h) hit = q[0]; });
     return hit;
   }
+  /* 是否在略圖框的框線附近（拖框線＝移動略圖框，框內＝移圖） */
+  function nearFrame(m, p) {
+    var t = Math.max(2.5, 9 / App.view.z);
+    return p[0] - m.x < t || m.x + m.w - p[0] < t || p[1] - m.y < t || m.y + m.h - p[1] < t;
+  }
   function hitDivider(p) {
     if (!App.sel || App.sel.kind !== 'el') return null;
     var el = elById(App.sel.id);
@@ -636,6 +641,7 @@
       }
       select(hit);
       if (hit.kind === 'flabel' || hit.kind === 'anno' || hit.kind === 'ptext') drag = { type: 'sub', sel: hit, m: m, sp: p, moved: false };
+      else drag = { type: 'pan', m: m, sp: p, cx: m.cx, cy: m.cy, lazy: true };   // 點到線或說明項目後拖曳 → 移圖
       return;
     }
     var el2 = hitElement(p);
@@ -651,6 +657,7 @@
         }
       } else App.selCell = null;
       select({ kind: 'el', id: el2.id }, true);
+      if (el2.type === 'map' && el2.cx != null && !nearFrame(el2, p)) { drag = { type: 'pan', m: el2, sp: p, cx: el2.cx, cy: el2.cy, lazy: true }; return; }
       // 表格編輯中只選格子不移動；平常拖曳＝移動整個元件
       if (!el2.locked && !(isTbl && App.tableEdit === el2.id)) drag = { type: 'move', el: el2, sp: p, orig: clone(el2), b: R.bounds(el2, App.P), moved: false };
       return;
@@ -674,6 +681,7 @@
         var h = hitHandle(p), d = !h && hitDivider(p);
         if (h) cur = { n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', ne: 'nesw-resize', sw: 'nesw-resize', nw: 'nwse-resize', se: 'nwse-resize', p1: 'move', p2: 'move' }[h];
         else if (d) cur = d.dir === 'col' ? 'col-resize' : 'row-resize';
+        else if (m && m.cx != null) cur = nearFrame(m, p) ? 'move' : 'grab';
       }
       svg.style.cursor = cur;
       if (App.draw) {
@@ -693,6 +701,8 @@
       case 'region': case 'lsel':
         App.rubber = { x: Math.min(drag.sx, p[0]), y: Math.min(drag.sy, p[1]), w: Math.abs(p[0] - drag.sx), h: Math.abs(p[1] - drag.sy) }; break;
       case 'pan': {
+        if (drag.lazy && !drag.moved && Math.hypot(dx, dy) < 2 / App.view.z) return;
+        drag.moved = true;
         var k = 1000 / drag.m.scale;
         drag.m.cx = round(drag.cx - dx / k, 3); drag.m.cy = round(drag.cy + dy / k, 3); break;
       }
@@ -826,9 +836,9 @@
   }
 
   /* ================= 說明項目 ================= */
-  function ovFeatures(ov) { ov = ov || App.P.activeOv || 'case'; return App.P.features.filter(function (f) { return (f.ov || 'case') === ov; }); }
-  function ovScheme(ov) { var o = App.P.ovs[ov || App.P.activeOv] || {}; return o.codeScheme || 'alpha'; }
-  function nextCodeOv() { return M.nextCode(ovFeatures(), ovScheme()); }
+  function ovFeatures() { return App.P.features; }
+  function ovScheme() { return App.P.settings.codeScheme || (App.P.ovs.case && App.P.ovs.case.codeScheme) || 'alpha'; }
+  function nextCodeOv() { return M.nextCode(App.P.features, ovScheme()); }
   function arcAdj(pts) { return App.cad ? round(G.arcCorrection(pts, App.cad.arcs), 6) : 0; }
   function faceSegs(m, pts) {
     var P = App.P, segs = [], R2 = Math.max(m.w, m.h) * m.scale / 1000, bx = G.bbox(pts);
@@ -1483,14 +1493,8 @@
     };
   }
   function renderFeatTab() {
-    var box = $('#tab-feat'), P = App.P, h = '', ov = P.activeOv || 'case', OV = P.ovs[ov];
-    // 圖層（現況 / 分割）切換：兩者互不影響，只是疊在一起展示
-    h += '<div class="ovbar">' + Object.keys(P.ovs).map(function (k) {
-      var o = P.ovs[k], n = P.features.filter(function (f) { return (f.ov || 'case') === k; }).length;
-      return '<button data-ov="' + k + '" class="' + (k === ov ? 'on' : '') + '">' + R.esc(o.name) + '（' + n + '）</button>' +
-        '<label class="inline small" title="顯示/隱藏此圖層"><input type="checkbox" data-ovvis="' + k + '"' + (o.visible !== false ? ' checked' : '') + '>顯示</label>';
-    }).join('') + '</div>';
-    h += '<p class="small">目前編輯「' + R.esc(OV.name) + '」：點選成面只用地籍線＋' + R.esc(OV.name) + '線當邊界，編號也獨立計算。</p>';
+    var box = $('#tab-feat'), P = App.P, h = '', ov = P.activeOv || 'case', OV = { codeScheme: ovScheme() };
+    h += '<p class="small">點選成面會用「地籍線＋目前編輯圖層的線」當邊界；目前編輯圖層：<b>' + R.esc(P.ovs[ov].name) + '</b>（頂端「編輯」切換）。</p>';
     h += '<div class="btnrow">' + btn('toolFace', '點選成面 (F)', 'primary') + btn('toolPoly', '手繪多邊形 (P)') + '</div>';
     var LC = P.settings.flistCols || ['landNo', 'note'], LN = { landNo: '地號', note: '備註', owner: '所有權人', extra: '其他' };
     h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th><th>' + LN[LC[0]] + '</th><th>' + LN[LC[1]] + '</th><th></th></tr></thead><tbody>';
@@ -1519,8 +1523,7 @@
       btn('distribute', '配賦尾差') + btn('undistribute', '清除面積') + '</div></details>';
     box.innerHTML = h;
     $$('[data-fr]', box).forEach(function (c) { c.onchange = function () { P.settings.faceRoles = Object.assign({}, FR); P.settings.faceRoles[c.dataset.fr] = c.checked; changed(); }; });
-    $$('[data-ovvis]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.ovvis].visible = c.checked; changed(); render(); }; });
-    $('[data-k=_scheme]', box).onchange = function () { OV.codeScheme = this.value; changed(); };
+    $('[data-k=_scheme]', box).onchange = function () { P.settings.codeScheme = this.value; changed(); };
     ['flc0', 'flc1'].forEach(function (id, i) { $('#' + id, box).onchange = function () { var lc = LC.slice(); lc[i] = this.value; P.settings.flistCols = lc; renderFeatTab(); }; });
     $('#regArea', box).onchange = function () { P.settings.regArea = this.value; changed(); };
     $$('input[data-f]', box).forEach(function (i) {
@@ -1531,8 +1534,6 @@
       i.addEventListener('focus', function () { var f = featById(i.closest('tr').dataset.fid); App.sel = { kind: 'feature', id: f.id, mapId: (maps()[0] || {}).id }; renderProps(); render(); });
     });
     box.onclick = function (ev) {
-      var o = ev.target.closest('[data-ov]');
-      if (o) { setActiveOv(o.dataset.ov); return; }
       var a = ev.target.closest('[data-act]');
       if (a) {
         if (a.dataset.act === 'toolFace') setTool('face');
@@ -1609,6 +1610,9 @@
       h += '<div class="btnrow">' + btn('mgDetect', '依圖上的 X 記號自動判斷') + '</div>';
       h += '<p class="small">' + (MG.mode === 'off' ? '目前不合併。' : '找到界線 ' + Object.keys(MI.internal).length + ' 段' + (MI.missing.length ? '；找不到地號：' + R.esc(MI.missing.join('、')) : '')) + '　合併界線不會當作點選成面的邊界。</p>';
     } else h += '<p class="small">尚未匯入圖資。請匯入內網套疊產出的整段地籍 DXF（例：486.dxf），也可同時選取案件 DXF（例：KC1117.dxf）一起套疊。</p>';
+    h += '<div class="sec">圖層顯示</div><div class="btnrow">' + Object.keys(P.ovs).map(function (k) {
+      return '<label class="inline"><input type="checkbox" data-ovvis="' + k + '"' + (P.ovs[k].visible !== false ? ' checked' : '') + '>' + R.esc(P.ovs[k].name) + '</label>';
+    }).join('') + '</div>';
     h += '<details class="fold"><summary>線條與文字樣式</summary>';
     h += '<div class="sec">線條樣式（依用途）</div><table class="flist"><thead><tr><th></th><th>顏色</th><th>線寬</th><th>線型</th></tr></thead><tbody>';
     [['parcelLine', '地籍線'], ['caseLine', '現況'], ['splitLine', '分割'], ['otherLine', '其他線']].forEach(function (r) {
@@ -1635,6 +1639,7 @@
     $$('[data-role]', box).forEach(function (s) {
       s.addEventListener('change', function () { P.layerRoles[s.dataset.role] = s.value; render(); changed(); });
     });
+    $$('[data-ovvis]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.ovvis].visible = c.checked; changed(); render(); }; });
     var mgP = $('#mgParcels', box), mgM = $('#mgMode', box), mgX = $('#mgX', box);
     if (mgP) {
       mgP.onchange = function () { P.merge.parcels = mgP.value; changed(); render(); renderLayerTab(); };
@@ -1813,7 +1818,7 @@
     $$('[data-tool]').forEach(function (b) { b.classList.toggle('on', b.dataset.tool === t); });
     stage.dataset.tool = t;
     var tips = {
-      select: '選取：單擊選取、拖曳移動；雙擊表格進入表格編輯（拉格線、點格子）', pan: '移動圖面：在略圖框內拖曳以改變裁切位置',
+      select: '選取：單擊選取、拖曳移動；略圖框內拖曳＝移圖（拖框線＝移動框）；雙擊表格進入表格編輯', pan: '移動圖面：在略圖框內拖曳以改變裁切位置',
       face: '點選成面：在略圖內點選封閉區域，自動建立說明項目並計算面積', poly: '多邊形：逐點點選（自動鎖點），雙擊或 Enter 完成，Esc 取消，Backspace 退一點',
       line: '畫現況線：逐點點選，雙擊或 Enter 完成（畫好後可在右側改線型、顏色）',
       sline: '畫分割線：逐點點選（自動鎖點），雙擊或 Enter 完成；畫好後可用「點選成面」切出分割範圍', break: '斷線：在線段上點一下，把它切成兩段，之後可分別設定線型（例如一段實線、一段虛線）', text: '文字：在略圖內點選＝圖面註記；在略圖外＝版面文字',

@@ -27,7 +27,8 @@ const path = require('path');
   await pg.evaluate(() => { const t = App.P.elements.find(e => e.type === 'table'); t.x = 20.7; t.y = 44.5; App.api.render(); });
   // 雙擊進入表格編輯
   p = await toScreen(50, 100); await pg.mouse.dblclick(p[0], p[1]);
-  check('dblclick enters table edit', await pg.evaluate(() => !!App.tableEdit));
+  const dbg = await pg.evaluate(([x, y]) => ({ sel: App.sel, te: App.tableEdit, at: (document.elementFromPoint(x, y) || {}).id || (document.elementFromPoint(x, y) || {}).tagName }), p);
+  check('dblclick enters table edit ' + JSON.stringify(dbg), await pg.evaluate(() => !!App.tableEdit));
   // 2) 拖拉列分隔線 (第 4 列底 y=44.5+11.4+6.2+6.1+22.9+57.9=149.0)
   const before = await pg.evaluate(() => App.P.elements.find(e => e.type === 'table').rows.slice());
   p = await toScreen(50, 149.0); await pg.mouse.move(p[0], p[1]); await pg.mouse.down();
@@ -70,6 +71,22 @@ const path = require('path');
   await pg.fill('[data-k=scale]', '1000');
   const m2 = await pg.evaluate(() => App.P.elements.filter(e => e.type === 'map').map(m => m.scale));
   check('second map 1/1000 ' + m2, m2.length === 2 && m2[1] === 1000);
+  // 8b) 下拉選單不被遮住
+  await pg.click('#toolbar .dd .ddbtn');
+  const menuOk = await pg.evaluate(() => { const b = document.querySelector('#toolbar .ddmenu [data-cmd=saveas]'); const r = b.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!e && b.contains(e) && r.height > 10; });
+  check('檔案選單完整顯示', menuOk);
+  await pg.keyboard.press('Escape'); await pg.mouse.click(5, 900);
+  // 8c) 選取工具：略圖框內拖曳＝移圖；拖框線＝移動框
+  await pg.keyboard.press('v');
+  const mp = await pg.evaluate(() => { const m = App.P.elements.find(e => e.type === 'map'); App.api.selectFn(null); return { x: m.x, y: m.y, w: m.w, h: m.h, cx: m.cx }; });
+  p = await toScreen(mp.x + mp.w * 0.7, mp.y + mp.h * 0.85); await pg.mouse.move(p[0], p[1]); await pg.mouse.down();
+  q = await toScreen(mp.x + mp.w * 0.7 + 10, mp.y + mp.h * 0.85); await pg.mouse.move(q[0], q[1], { steps: 5 }); await pg.mouse.up();
+  const mp2 = await pg.evaluate(() => { const m = App.P.elements.find(e => e.type === 'map'); return { x: m.x, cx: m.cx }; });
+  check('框內拖曳＝移圖 (cx ' + mp.cx + '→' + mp2.cx + ', x 不變)', mp2.x === mp.x && Math.abs(mp.cx - mp2.cx - 5) < 0.05);
+  p = await toScreen(mp.x + 0.5, mp.y + mp.h * 0.3); await pg.mouse.move(p[0], p[1]); await pg.mouse.down();
+  q = await toScreen(mp.x + 0.5 + 6, mp.y + mp.h * 0.3); await pg.mouse.move(q[0], q[1], { steps: 5 }); await pg.mouse.up();
+  const mp3 = await pg.evaluate(() => { const m = App.P.elements.find(e => e.type === 'map'); return { x: m.x, cx: m.cx }; });
+  check('拖框線＝移動略圖框 (x ' + mp.x + '→' + mp3.x + ')', Math.abs(mp3.x - mp.x - 6) < 1.5 && mp3.cx === mp2.cx);
   // 9) 列印按鈕
   await pg.click('#toolbar [data-cmd=printA3]'); await pg.waitForTimeout(200);
   check('print A3 builds page', (await pg.evaluate(() => window.__printed)) > 1000);
