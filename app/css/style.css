@@ -6,7 +6,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); }
-#app { display: grid; height: 100vh; grid-template-columns: 300px 1fr 290px; grid-template-rows: auto 1fr 26px;
+#app { display: grid; height: 100vh; grid-template-columns: 300px 1fr 320px; grid-template-rows: auto 1fr 26px;
   grid-template-areas: "top top top" "left stage right" "status status status"; }
 button { font: inherit; border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 5px; padding: 4px 9px; cursor: pointer; }
 button:hover { border-color: var(--accent); }
@@ -22,7 +22,13 @@ textarea { resize: vertical; }
 #toolbar .brand { font-weight: 700; margin-right: 6px; color: #12355b; }
 #toolbar .grp { display: flex; gap: 3px; align-items: center; padding-right: 8px; border-right: 1px solid var(--line); }
 #toolbar .grp.right { margin-left: auto; border-right: 0; }
-#toolbar .lbl { color: var(--muted); padding: 0 3px; }
+#toolbar .lbl { color: var(--muted); padding: 0 3px; white-space: nowrap; }
+#toolbar button { white-space: nowrap; }
+#planSel { width: 110px; }
+table.cols select { min-width: 72px; }
+table.cols input { min-width: 0; }
+table.cols td:nth-child(2) input { width: 100%; }
+table.cols td:nth-child(3) input, table.cols td:nth-child(4) input { width: 44px; }
 
 #left, #right { background: var(--panel); overflow: auto; }
 #left { grid-area: left; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
@@ -94,6 +100,7 @@ table.flist td:first-child input { width: 38px; }
 .ov-region { fill: rgba(255, 140, 0, .07); stroke: #ff8c00; stroke-width: 2px; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
 .ov-label { fill: #1f6feb; font-family: "Microsoft JhengHei", sans-serif; }
 
+#toast:empty { display: none; }
 #toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); background: #12355b; color: #fff; padding: 8px 16px; border-radius: 6px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 50; }
 #toast.show { opacity: .95; }
 

@@ -20,12 +20,19 @@
     <div class="grp">
       <button data-cmd="import" class="primary" title="匯入整段地籍 DXF 與案件 DXF">匯入 DXF</button>
     </div>
+    <div class="grp plan">
+      <span class="lbl">方案</span><select id="planSel" title="同一案件的不同方案（現況、分割方案1、2…），各自有圖資、地上物與版面"></select>
+      <button data-cmd="planAdd" title="複製目前方案為新方案">＋</button>
+      <button data-cmd="planRen" title="方案改名">改名</button>
+      <button data-cmd="planDel" title="刪除目前方案">✕</button>
+    </div>
     <div class="grp tools">
       <button data-tool="select" title="選取 (V)">↖ 選取</button>
       <button data-tool="pan" title="移動圖面／裁切位置 (H)">✥ 移動圖面</button>
       <button data-tool="face" title="點選成面 (F)">▣ 點選成面</button>
       <button data-tool="poly" title="手繪多邊形 (P)">⬠ 多邊形</button>
       <button data-tool="line" title="畫線 (L)">╱ 畫線</button>
+      <button data-tool="break" title="斷線 (B)：把一條線切成兩段">✂ 斷線</button>
       <button data-tool="text" title="文字 (T)">T 文字</button>
     </div>
     <div class="grp">
@@ -100,6 +107,8 @@
     <li><b>地上物</b>：用「點選成面(F)」在每個區塊內點一下，自動成面並計算面積、編號 A、B、C…；在「地上物」頁填寫使用地號、備註。說明表自動產生。</li>
     <li><b>案件資料</b>：填寫左側欄位（土地坐落、囑託法院及文號、囑託事項、收件、鑑測日期…），版面自動帶入。</li>
     <li><b>版面</b>：所有元件都可拖曳、縮放；表格可拖拉格線調整欄寬列高、插入/刪除列欄、合併儲存格。可新增多個略圖框。</li>
+    <li><b>線型與斷線</b>：選取線段可以改成虛線、點線、鏈線等；用「斷線(B)」把一條線切成兩段，分別設定（例如非本案部分用虛線）。</li>
+    <li><b>方案</b>：同一案件有多個分割方案時，用工具列「方案 ＋」複製出新方案，各自匯入 DXF 並修改。</li>
     <li><b>輸出</b>：列印 A3（1:1）；在「輸出」頁框選範圍後「8K 套印」，會自動放在 8K 紙左下角平移 X20、Y20 處。</li>
     <li><b>核定後</b>：填入核定日期 → 再印 A3 份數。</li>
   </ol>

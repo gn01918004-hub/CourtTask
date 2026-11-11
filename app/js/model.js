@@ -74,8 +74,11 @@
         id: uid(), type: 'ftable', name: '地上物說明表', x: 85.5, y: 77.6, lw: 0.24,
         cols: [19, 19, 20, 19.9], titleH: 13.3, headerH: 11.4, rowH: 8.6, rowHs: {}, notesH: 8.5,
         title: '{landNo}地號地上物說明：', titleFs: 5.6,
-        headers: ['編號：', '面積\n(平方公尺)', '使用地號', '備註'], headerFs: 3.1,
-        dataFs: 5.16, noteFs: 3.94, decimals: 2,
+        columns: [
+          { key: 'code', header: '編號：' }, { key: 'area', header: '面積\n(平方公尺)' },
+          { key: 'landNo', header: '使用地號' }, { key: 'note', header: '備註', fs: 3.94 }
+        ],
+        headerFs: 3.1, dataFs: 5.16, decimals: 2,
         notes: '1.面積計算至平方公分，以平方公尺為單位。\n2.虛線表位於非本案標的之部分，並未列入面積計算。', notesFs: 3.05,
         cellOver: {}
       },
@@ -88,15 +91,17 @@
 
   function defaultStyles() {
     return {
-      parcelLine: { color: '#000000', width: 0.15 },
-      caseLine: { color: '#ff0000', width: 0.2 },
-      otherLine: { color: '#000000', width: 0.15 },
+      parcelLine: { color: '#000000', width: 0.15, dash: 'solid' },
+      caseLine: { color: '#ff0000', width: 0.2, dash: 'solid' },
+      splitLine: { color: '#ff0000', width: 0.3, dash: 'solid' },
+      otherLine: { color: '#000000', width: 0.15, dash: 'solid' },
       parcelText: { color: '#000000', size: 6.2 },
       targetText: { color: '#ff0000', size: 6.2 },
       otherText: { color: '#000000', size: 4 },
       featureLabel: { color: '#ff0000', size: 6.2 },
       anno: { color: '#000000', size: 4.2 },
-      mapFont: 'sans'
+      mapFont: 'sans',
+      autoAvoid: true
     };
   }
 
@@ -116,7 +121,9 @@
       userLines: [],
       elements: defaultElements(),
       output: { k8: { w: 267, h: 388, offX: 20, offY: 20, dx: 0, dy: 0, region: null } },
-      settings: { snapEdges: true, faceWithParcel: true }
+      settings: { snapEdges: true, faceWithParcel: true, codeScheme: 'alpha' },
+      splits: {},
+      plans: [{ name: '方案1', data: null }], planIdx: 0
     };
     if (tpl) {
       ['elements', 'styles', 'sheet', 'output', 'settings'].forEach(function (k) { if (tpl[k]) p[k] = JSON.parse(JSON.stringify(tpl[k])); });
@@ -161,18 +168,23 @@
   }
 
   /* 自動編號 A..Z, AA.. */
-  function nextCode(features) {
+  var STEMS = '甲乙丙丁戊己庚辛壬癸';
+  function codeAt(i, scheme) {
+    if (scheme === 'num') return String(i + 1);
+    if (scheme === 'stem') return STEMS[i % 10] + (i >= 10 ? Math.floor(i / 10) : '');
+    return i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + i % 26);
+  }
+  function nextCode(features, scheme) {
     var used = {};
     features.forEach(function (f) { used[f.code] = 1; });
-    for (var i = 0; i < 702; i++) {
-      var s = i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + i % 26);
-      if (!used[s]) return s;
-    }
+    for (var i = 0; i < 702; i++) { var s = codeAt(i, scheme); if (!used[s]) return s; }
     return '?';
   }
+  /* 方案（同一案件的不同分割方案）各自保有的資料 */
+  var PLAN_KEYS = ['elements', 'features', 'annos', 'userLines', 'segStyle', 'splits', 'textOver', 'layerRoles', 'output'];
 
   global.Model = {
     FIELDS: FIELDS, KAI: KAI, SANS: SANS, uid: uid, newProject: newProject, defaultElements: defaultElements,
-    defaultStyles: defaultStyles, measure: measure, wrap: wrap, fill: fill, fontFamily: fontFamily, nextCode: nextCode
+    defaultStyles: defaultStyles, measure: measure, codeAt: codeAt, PLAN_KEYS: PLAN_KEYS, wrap: wrap, fill: fill, fontFamily: fontFamily, nextCode: nextCode
   };
 })(typeof window !== 'undefined' ? window : globalThis);

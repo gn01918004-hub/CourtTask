@@ -41,30 +41,26 @@
   /* 裁切後 DXF（世界座標，如同 486f.dxf） */
   function croppedDXF(P, cad, mapEl) {
     var v = R.mapView(mapEl), w = new global.DXF.Writer();
+    var LY = R.layoutLabels(mapEl, P, cad);
+    R.eachPiece(P, cad, function (pc, role, ss, l) {
+      var c = G.clipSeg(pc.x1, pc.y1, pc.x2, pc.y2, v.X0, v.Y0, v.X1, v.Y1);
+      if (c) w.line(l.layer, c[0], c[1], c[2], c[3]);
+    });
     if (cad) {
-      cad.lines.forEach(function (l, idx) {
-        if (R.roleOf(P, l.layer, 'line') === 'hide') return;
-        var ss = P.segStyle[idx]; if (ss && ss.hidden) return;
-        var c = G.clipSeg(l.x1, l.y1, l.x2, l.y2, v.X0, v.Y0, v.X1, v.Y1);
-        if (c) w.line(l.layer, c[0], c[1], c[2], c[3]);
-      });
       cad.texts.forEach(function (t, idx) {
-        if (R.roleOf(P, t.layer, 'text') === 'hide') return;
-        var ov = P.textOver[idx] || {}; if (ov.hidden) return;
-        var x = ov.x != null ? ov.x : t.x, y = ov.y != null ? ov.y : t.y;
-        if (x < v.X0 || x > v.X1 || y < v.Y0 || y > v.Y1) return;
-        w.text(t.layer, x, y, t.h, t.text, { center: true, rot: t.rot });
+        var pos = LY.text[idx]; if (!pos) return;
+        w.text(t.layer, pos[0], pos[1], t.h, t.text, { center: true, rot: t.rot });
       });
     }
     (P.userLines || []).forEach(function (l) {
       var c = G.clipSeg(l.x1, l.y1, l.x2, l.y2, v.X0, v.Y0, v.X1, v.Y1);
-      if (c) w.line('REF_LINE0', c[0], c[1], c[2], c[3]);
+      if (c) w.line(l.role === 'split' ? 'SPLIT' : 'REF_LINE0', c[0], c[1], c[2], c[3]);
     });
     P.features.forEach(function (f) {
       var pts = G.clipPoly(f.pts, v.X0, v.Y0, v.X1, v.Y1);
       if (pts.length < 3) return;
       w.poly('FEATURE', pts, true);
-      var lp = f.labelAt || G.labelPoint(f.pts);
+      var lp = LY.feat[f.id] || f.labelAt || G.labelPoint(f.pts);
       w.text('FEATURE_TXT', lp[0], lp[1], 2.5, f.code, { center: true });
     });
     P.annos.forEach(function (a) {
