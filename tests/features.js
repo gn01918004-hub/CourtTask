@@ -66,9 +66,10 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
   check('roundtrip 2 plans ' + JSON.stringify(rt), rt.plans === 2 && rt.cads === 2 && rt.c1 > 9000);
   // 說明表欄位預設：2 欄
   await pg.evaluate(() => { const ft = App.P.elements.find(e => e.type === 'ftable'); App.api.selectFn({ kind: 'el', id: ft.id }); });
-  await pg.click('[data-act=preset2]');
-  const cols = await pg.evaluate(() => App.P.elements.find(e => e.type === 'ftable').columns.map(c => c.key).join(','));
-  check('ftable preset 2 columns: ' + cols, cols === 'code,area');
+  const tn0 = await pg.evaluate(() => { const ft = App.P.elements.find(e => e.type === 'ftable'); return [ft.titleH, ft.notesH]; });
+  await pg.selectOption('[data-act-sel=tstyle]', 'code2');
+  const cols = await pg.evaluate(() => { const ft = App.P.elements.find(e => e.type === 'ftable'); return [ft.columns.map(c => c.key).join(','), ft.titleH, ft.notesH]; });
+  check('表格樣式下拉：編號/坐落面積，標題與附註保留 ' + JSON.stringify(cols), cols[0] === 'code,area' && cols[1] === tn0[0] && cols[2] === tn0[1] && cols[1] > 0);
   // 說明表列高自動配合文字
   const rh = await pg.evaluate(() => {
     const ft = App.P.elements.find(e => e.type === 'ftable'), m = App.P.elements.find(e => e.type === 'map');

@@ -312,8 +312,18 @@
     rafPending = true;
     requestAnimationFrame(function () { rafPending = false; renderNow(); });
   }
+  /* 第二張說明表自動跟在第一張下方 */
+  function layoutStacked() {
+    App.P.elements.forEach(function (e) {
+      if (!e.stackBelow) return;
+      var up = elById(e.stackBelow); if (!up) { delete e.stackBelow; return; }
+      var b = R.bounds(up, App.P);
+      e.x = up.x; e.y = Math.round((b.y + b.h + 6) * 100) / 100;
+    });
+  }
   function renderNow() {
     applyView();
+    layoutStacked();
     var P = App.P, s = '';
     s += '<defs><filter id="shadow" x="-5%" y="-5%" width="110%" height="110%"><feDropShadow dx="0.6" dy="0.8" stdDeviation="1.2" flood-opacity="0.25"/></filter></defs>';
     s += '<rect x="0" y="0" width="' + P.sheet.w + '" height="' + P.sheet.h + '" fill="#fff" filter="url(#shadow)"/>';
@@ -728,7 +738,7 @@
       }
       case 'move':
         if (!drag.moved && Math.hypot(dx, dy) < 2 / App.view.z) return;
-        drag.moved = true; el = drag.el; o = drag.orig;
+        drag.moved = true; el = drag.el; o = drag.orig; delete el.stackBelow;
         var sd = ev.altKey ? [dx, dy] : snapMove(el, drag.b, dx, dy);
         el.x = round(o.x + sd[0], 2); el.y = round(o.y + sd[1], 2); break;
       case 'resize': resizeEl(drag, dx, dy, ev); break;
@@ -891,7 +901,7 @@
   function addMarkAt(m, w) {
     var P = App.P;
     var f = { id: M.uid(), ov: P.activeOv || 'case', code: nextCodeOv(), pt: [round(w[0], 3), round(w[1], 3)], pts: [], landNo: P.fields.landNo || '', note: '', label: true };
-    P.features.push(f); select({ kind: 'feature', id: f.id, mapId: m.id });
+    P.features.push(f); ensureSplitTables(); select({ kind: 'feature', id: f.id, mapId: m.id });
     changed(); toast('新增標號 ' + f.code + '（不計算面積，可在「說明」頁填備註）');
   }
   function addFaceAt(m, w, merge) {
@@ -918,7 +928,7 @@
       landNo: P.fields.landNo || '', note: '', outline: false, dash: false, label: true, seeds: [w]
     };
     f.arcAdj = arcAdj(f.pts);
-    P.features.push(f); select({ kind: 'feature', id: f.id, mapId: m.id });
+    P.features.push(f); ensureSplitTables(); select({ kind: 'feature', id: f.id, mapId: m.id });
     changed(); toast('新增說明項目 ' + f.code + '：' + R.featureArea(f, 2) + ' m²（Shift+點選相鄰區塊可併入）');
   }
   function finishDraw() {
@@ -928,7 +938,7 @@
       if (d.pts.length >= 3) {
         var f = { id: M.uid(), ov: P.activeOv || 'case', code: nextCodeOv(), pts: d.pts.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }), landNo: P.fields.landNo || '', note: '', outline: true, dash: false, label: true };
         f.arcAdj = arcAdj(f.pts);
-        P.features.push(f); App.draw = null; select({ kind: 'feature', id: f.id, mapId: d.mapId }); changed();
+        P.features.push(f); ensureSplitTables(); App.draw = null; select({ kind: 'feature', id: f.id, mapId: d.mapId }); changed();
         toast('新增說明項目 ' + f.code + '：' + G.area(f.pts).toFixed(2) + ' m²');
       } else { App.draw = null; toast('至少需要 3 點'); }
     } else {
@@ -1513,9 +1523,49 @@
     h += '<div class="btnrow">' + btn('merge', '合併儲存格') + btn('split', '取消合併') + '</div>';
     return h;
   }
+  /* 說明表樣式（只換欄位；標題、附註保留）。split 樣式另外把標題換成「分割方案說明」 */
+  var TABLE_STYLES = {
+    case4: { name: '地上物：編號／面積／使用地號／備註', cols: [[{ key: 'code', header: '編號：' }, { key: 'area', header: '面積\n(平方公尺)' }, { key: 'landNo', header: '使用地號：' }, { key: 'note', header: '備註', fs: 3.94 }], [19, 19, 20, 19.9]], title: '{landNo}地號地上物說明：' },
+    owner: { name: '分割：編號／面積／所有權人', cols: [[{ key: 'code', header: '編號：' }, { key: 'area', header: '面積\n(平方公尺)', fs: 4.5 }, { key: 'owner', header: '所有權人', fs: 4.5 }], [17, 17, 35]], title: '{landNo}地號分割方案說明：' },
+    name3: { name: '名稱／面積／地號', cols: [[{ key: 'code', header: '名稱' }, { key: 'area', header: '面積\n( 平方公尺 )' }, { key: 'landNo', header: '地號' }], [20, 33, 23]] },
+    code2: { name: '編號／坐落面積', cols: [[{ key: 'code', header: '編號' }, { key: 'area', header: '坐落面積\n( 平方公尺 )' }], [20, 33]] }
+  };
+  function tableStyleOf(el) {
+    var k = (el.columns || []).map(function (c) { return c.key; }).join(',');
+    return k === 'code,area,landNo,note' ? 'case4' : k === 'code,area,owner' ? 'owner' : k === 'code,area,landNo' ? 'name3' : k === 'code,area' ? 'code2' : '';
+  }
+  function applyTableStyle(el, key) {
+    var st = TABLE_STYLES[key]; if (!st) return;
+    el.columns = clone(st.cols[0]); el.cols = st.cols[1].slice();
+    if (st.title && /地上物說明|分割方案說明/.test(el.title || '')) el.title = st.title;   // 只替換系統預設的標題
+    if (!el.titleH && st.title) el.titleH = 13.3;
+  }
+  /* 同時有現況與分割的說明項目時，自動分成兩張說明表：地上物說明（現況）、分割方案說明（分割） */
+  function ensureSplitTables() {
+    var P = App.P, has = { case: false, split: false };
+    P.features.forEach(function (f) { has[f.ov || 'case'] = true; });
+    if (!has.case || !has.split) return;
+    var fts = P.elements.filter(function (e) { return e.type === 'ftable'; });
+    if (!fts.length || fts.some(function (e) { return e.ov === 'split'; })) return;
+    var first = fts.filter(function (e) { return !e.ov || e.ov === 'case'; })[0];
+    if (!first) return;
+    first.ov = 'case';
+    if (/分割方案說明/.test(first.title || '')) first.title = '{landNo}地號地上物說明：';
+    var b = R.bounds(first, P), t2 = clone(first);
+    t2.id = M.uid(); t2.name = '分割方案說明表'; t2.ov = 'split'; t2.rowHs = {};
+    applyTableStyle(t2, 'owner'); t2.title = '{landNo}地號分割方案說明：';
+    t2.y = Math.round((b.y + b.h + 6) * 100) / 100; t2.stackBelow = first.id;   // 自動接在地上物說明表下方（手動拖動後就不再跟隨）
+    first.name = '地上物說明表';
+    P.elements.push(t2);
+    renderLayerList();
+    toast('現況與分割都有說明項目，已自動分成「地上物說明」與「分割方案說明」兩張表', 4500);
+  }
   var FT_KEYS = [['code', '編號／名稱'], ['area', '面積'], ['landNo', '地號'], ['note', '備註'], ['owner', '所有權人'], ['extra', '其他(自訂)']];
   function ftableProps(el) {
     var h = '<div class="sec">說明表</div>';
+    var cur = tableStyleOf(el);
+    h += field('表格樣式', '<select data-act-sel="tstyle">' + (cur ? '' : '<option value="">（自訂欄位）</option>') + Object.keys(TABLE_STYLES).map(function (k) {
+      return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + TABLE_STYLES[k].name + '</option>'; }).join('') + '</select>');
     h += field('標題（列高 0 = 不顯示標題列）', inp('title', el.title));
     h += '<div class="grid2">' + field('列出哪一層', sel('ov', el.ov || '', [['', '全部']].concat(Object.keys(App.P.ovs).map(function (k) { return [k, App.P.ovs[k].name]; })))) +
       field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || '')) + '</div>';
@@ -1534,7 +1584,6 @@
         '<td class="ops"><button data-cop="up">↑</button><button data-cop="down">↓</button><button data-cop="del">✕</button></td></tr>';
     });
     h += '</tbody></table><div class="btnrow">' + btn('colAdd', '新增欄位') + btn('rowsUniform', '資料列高全部一致') + '</div>';
-    h += '<div class="btnrow">' + btn('preset4', '樣式：編號/面積/地號/備註') + btn('preset3', '名稱/面積/地號') + btn('preset2', '編號/坐落面積') + btn('presetOwner', '編號/面積/所有權人') + '</div>';
     h += field('附註文字', ta('notes', el.notes, 3));
     h += '<p class="small">內容由左側「說明」頁的清單自動產生，修改說明項目資料即同步更新。</p>';
     return h;
@@ -1556,6 +1605,9 @@
         else c[k] = i.value;
         render(); changed();
       });
+    });
+    $$('[data-act-sel]', box).forEach(function (sl) {
+      sl.addEventListener('change', function () { if (!sl.value) return; applyTableStyle(el, sl.value); render(); changed(); renderProps(); });
     });
     $$('[data-cop]', box).forEach(function (b) {
       b.addEventListener('click', function (ev) {
@@ -1601,17 +1653,7 @@
     if (el.type === 'ftable') {
       if (act === 'rowsUniform') el.rowHs = {};
       if (act === 'colAdd') { el.columns.push({ key: 'note', header: '備註' }); el.cols.push(18); }
-      var PRESET = {
-        preset4: [[{ key: 'code', header: '編號：' }, { key: 'area', header: '面積\n(平方公尺)' }, { key: 'landNo', header: '使用地號：' }, { key: 'note', header: '備註', fs: 3.94 }], [19, 19, 20, 19.9]],
-        preset3: [[{ key: 'code', header: '名稱' }, { key: 'area', header: '面積\n( 平方公尺 )' }, { key: 'landNo', header: '地號' }], [20, 33, 23]],
-        preset2: [[{ key: 'code', header: '編號' }, { key: 'area', header: '坐落面積\n( 平方公尺 )' }], [20, 33]],
-        presetOwner: [[{ key: 'code', header: '編號：' }, { key: 'area', header: '面積\n(平方公尺)', fs: 4.5 }, { key: 'owner', header: '所有權人', fs: 4.5 }], [17, 17, 35]]
-      }[act];
-      if (PRESET) {
-        el.columns = clone(PRESET[0]); el.cols = PRESET[1].slice();
-        if (act === 'preset3' || act === 'preset2') { el.titleH = 0; el.notesH = 0; }
-        if (act === 'presetOwner') { el.title = '{landNo}地號分割方案說明：'; el.titleH = el.titleH || 13.3; el.notes = '一、為方便計算，本案已先將{landNo}地號進行合併後展示。\n二、面積計算至平方公分，以平方公尺為單位。'; el.notesH = Math.max(el.notesH, 8.5); }
-      }
+      if (act === 'tstyle') applyTableStyle(el, arguments[2] && arguments[2].value);
     }
     if (el.type === 'map') {
       if (act === 'centerCase') centerMap(el, 'case') || toast('沒有案件線');

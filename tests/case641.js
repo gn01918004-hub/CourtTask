@@ -48,7 +48,7 @@ const OUT = process.argv[2];
   console.log(res.map(r => r.join('=')).join(' '));
   const exact = res.filter(([c, a]) => Math.abs(+a - official[c]) < 0.001).length;
   check(`computed areas: ${exact}/16 equal official before 配賦 (others differ by 0.01)`, exact >= 13 && res.every(([c, a]) => Math.abs(+a - official[c]) <= 0.0101));
-  await pg.click('[data-act=presetOwner]');
+  await pg.selectOption('[data-act-sel=tstyle]', 'owner');
   await pg.click('.tabs [data-tab=feat]');
   await pg.evaluate(() => document.querySelectorAll('#tab-feat details').forEach(d => d.open = true));
   await pg.fill('#regArea', '41124.94'); await pg.dispatchEvent('#regArea', 'change');

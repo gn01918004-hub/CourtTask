@@ -34,6 +34,8 @@ const OUT = process.argv[2];
   const feats = await pg.evaluate(() => App.P.features.map(f => (f.ov || 'case') + ':' + f.code + '=' + Render.featureArea(f, 2)));
   console.log('features', feats.join(' '));
   check('現況與分割同一份清單、同一套編號 A B C', feats.join(' ').indexOf('case:A') >= 0 && feats.some(s => s.startsWith('split:B')) && feats.some(s => s.startsWith('split:C')));
+  const tabs = await pg.evaluate(() => App.P.elements.filter(e => e.type === 'ftable').map(e => e.ov + ':' + e.title));
+  check('現況＋分割自動分成兩張說明表 ' + JSON.stringify(tabs), tabs.length === 2 && tabs.some(t => /^case:.*地上物說明/.test(t)) && tabs.some(t => /^split:.*分割方案說明/.test(t)));
   // 分割的面不受現況線影響：split 面積 = 只用地籍線+分割線的面
   const ok = await pg.evaluate(() => {
     const m = App.P.elements.find(e => e.type === 'map'); const f = App.P.features.find(f => f.ov === 'split');
