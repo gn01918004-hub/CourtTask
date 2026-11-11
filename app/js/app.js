@@ -96,7 +96,8 @@
     return {
       name: cad.name, layers: layers,
       lines: cad.lines.map(function (l) { return [L(l.layer), l.x1, l.y1, l.x2, l.y2]; }),
-      texts: cad.texts.map(function (t) { return [L(t.layer), t.x, t.y, t.h, t.rot, t.text, t.h72, t.v73]; })
+      texts: cad.texts.map(function (t) { return [L(t.layer), t.x, t.y, t.h, t.rot, t.text, t.h72, t.v73]; }),
+      arcs: cad.arcs || []
     };
   }
   function unpackCad(c) {
@@ -104,7 +105,8 @@
     return {
       name: c.name,
       lines: c.lines.map(function (a) { return { layer: c.layers[a[0]], x1: a[1], y1: a[2], x2: a[3], y2: a[4] }; }),
-      texts: c.texts.map(function (a) { return { layer: c.layers[a[0]], x: a[1], y: a[2], h: a[3], rot: a[4], text: a[5], h72: a[6], v73: a[7] }; })
+      texts: c.texts.map(function (a) { return { layer: c.layers[a[0]], x: a[1], y: a[2], h: a[3], rot: a[4], text: a[5], h72: a[6], v73: a[7] }; }),
+      arcs: c.arcs || []
     };
   }
   function fileData() {
@@ -201,8 +203,8 @@
         .then(function (list) {
           var replace = true;
           if (App.cad && App.cad.lines.length) replace = confirm('目前方案已經有圖資。\n按「確定」= 取代現有圖資\n按「取消」= 合併加入（套疊，例如另加分割線 DXF）');
-          var old = replace ? { name: '', lines: [], texts: [] } : App.cad;
-          var cad = { name: old.name, lines: old.lines.slice(), texts: old.texts.slice() };
+          var old = replace ? { name: '', lines: [], texts: [], arcs: [] } : App.cad;
+          var cad = { name: old.name, lines: old.lines.slice(), texts: old.texts.slice(), arcs: (old.arcs || []).slice() };
           if (replace) { App.P.segStyle = {}; App.P.textOver = {}; App.P.splits = {}; }
           // 重複線段只保留一條（layer 0 與 SPLIT 常重複）
           var seen = {};
@@ -216,6 +218,7 @@
               cad.lines.push(l); seen[k] = seen[key(l.x2, l.y2, l.x1, l.y1)] = cad.lines.length - 1;
             });
             cad.texts = cad.texts.concat(it.data.texts);
+            cad.arcs = cad.arcs.concat(it.data.arcs || []);
             cad.name = (cad.name ? cad.name + ' + ' : '') + it.name;
           });
           App.cad = cad; App.planCads[App.P.planIdx] = cad;
@@ -236,11 +239,11 @@
       var b = G.bbox(all); pt = [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
     }
     if (!pt && cad && (how === 'auto' || how === 'target')) {
-      var t = cad.texts.filter(function (t) { return R.roleOf(P, t.layer, 'text') === 'target'; })[0];
-      if (t) pt = [t.x, t.y];
+      var ts = cad.texts.filter(function (t) { return R.roleOf(P, t.layer, 'text') === 'target'; });
+      if (ts.length) { var tb = G.bbox(ts.map(function (t) { return [t.x, t.y]; })); pt = [(tb[0] + tb[2]) / 2, (tb[1] + tb[3]) / 2]; }
     }
     if (!pt && cad && how !== 'target') {
-      var cs = cad.lines.filter(function (l) { return R.roleOf(P, l.layer, 'line') === 'case'; });
+      var cs = cad.lines.filter(function (l) { var r = R.roleOf(P, l.layer, 'line'); return r === 'case' || r === 'split'; });
       if (cs.length) pt = [G.median(cs.map(function (l) { return (l.x1 + l.x2) / 2; })), G.median(cs.map(function (l) { return (l.y1 + l.y2) / 2; }))];
     }
     if (!pt && cad && cad.lines.length) {
@@ -541,17 +544,17 @@
 
     if (tool === 'face') {
       m = mapAt(p); if (!m) return toast('請在略圖框內點選');
-      addFaceAt(m, R.mapView(m).toW(p[0], p[1])); return;
+      addFaceAt(m, R.mapView(m).toW(p[0], p[1]), ev.shiftKey); return;
     }
     if (tool === 'break') {
       m = mapAt(p); if (!m) return toast('請在略圖框內點選線段');
       breakAt(m, p); return;
     }
-    if (tool === 'poly' || tool === 'line') {
+    if (tool === 'poly' || tool === 'line' || tool === 'sline') {
       m = App.draw ? elById(App.draw.mapId) : mapAt(p);
       if (!m) return toast('請在略圖框內點選');
       var sp = snapWorld(m, p);
-      if (!App.draw) App.draw = { type: tool, mapId: m.id, pts: [] };
+      if (!App.draw) App.draw = { type: tool === 'poly' ? 'poly' : 'line', role: tool === 'sline' ? 'split' : 'case', mapId: m.id, pts: [] };
       if (ev.detail >= 2) { finishDraw(); return; }
       App.draw.pts.push(sp.w); render(); return;
     }
@@ -643,7 +646,7 @@
       if (App.draw) {
         var dm = elById(App.draw.mapId), sp = snapWorld(dm, p);
         App.draw.cursor = sp.w; App.snapPt = sp.p; render();
-      } else if (App.tool === 'poly' || App.tool === 'line' || App.tool === 'break') {
+      } else if (App.tool === 'poly' || App.tool === 'line' || App.tool === 'sline' || App.tool === 'break') {
         if (m) { var s2 = snapWorld(m, p); App.snapPt = s2.p; } else App.snapPt = null;
         render();
       }
@@ -669,7 +672,7 @@
       case 'divider': dragDivider(drag, dx, dy); break;
       case 'vertex': {
         var sv = snapWorld(drag.m, p); App.snapPt = sv.p;
-        drag.f.pts[drag.i] = [round(sv.w[0], 4), round(sv.w[1], 4)]; refreshFeatures(); break;
+        drag.f.pts[drag.i] = [round(sv.w[0], 6), round(sv.w[1], 6)]; drag.f.arcAdj = arcAdj(drag.f.pts); delete drag.f.seeds; refreshFeatures(); break;
       }
       case 'sub': {
         if (!drag.moved && Math.hypot(dx, dy) < 2 / App.view.z) return;
@@ -782,25 +785,41 @@
   }
 
   /* ================= 地上物 ================= */
-  function addFaceAt(m, w) {
-    var P = App.P, segs = [], R2 = Math.max(m.w, m.h) * m.scale / 1000;
-    var bx = [w[0] - R2, w[1] - R2, w[0] + R2, w[1] + R2];
+  function arcAdj(pts) { return App.cad ? round(G.arcCorrection(pts, App.cad.arcs), 6) : 0; }
+  function faceSegs(m, pts) {
+    var P = App.P, segs = [], R2 = Math.max(m.w, m.h) * m.scale / 1000, bx = G.bbox(pts);
+    bx = [bx[0] - R2, bx[1] - R2, bx[2] + R2, bx[3] + R2];
     function add(x1, y1, x2, y2) { var c = G.clipSeg(x1, y1, x2, y2, bx[0], bx[1], bx[2], bx[3]); if (c) segs.push(c); }
-    R.eachPiece(P, App.cad, function (pc, role) {
-      if (role === 'case' || role === 'split' || P.settings.faceWithParcel) add(pc.x1, pc.y1, pc.x2, pc.y2);
-    });
-    P.userLines.forEach(function (l) { add(l.x1, l.y1, l.x2, l.y2); });
-    var face = G.faceAt(segs, w, 0.002);
+    var roles = P.settings.faceRoles || { parcel: true, case: true, split: true, other: false };
+    R.eachPiece(P, App.cad, function (pc, role) { if (roles[role]) add(pc.x1, pc.y1, pc.x2, pc.y2); });
+    P.userLines.forEach(function (l) { if (roles[l.role || 'case']) add(l.x1, l.y1, l.x2, l.y2); });
+    return segs;
+  }
+  function addFaceAt(m, w, merge) {
+    var P = App.P;
+    // Shift+點選：併入目前選取的地上物
+    var target = merge && App.sel && (App.sel.kind === 'feature' || App.sel.kind === 'flabel') ? featById(App.sel.id) : null;
+    if (target) {
+      var seeds = (target.seeds || [G.labelPoint(target.pts)]).concat([w]);
+      var u = G.faceUnionAt(faceSegs(m, seeds), seeds, 0.002);
+      if (!u) return toast('找不到可合併的封閉區域');
+      target.seeds = seeds; target.pts = u.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }); target.arcAdj = arcAdj(target.pts);
+      delete target.labelAt;
+      changed(); render(); refreshFeatures(); renderProps();
+      return toast('已併入 ' + target.code + '：' + R.featureArea(target, 2) + ' m²');
+    }
+    var face = G.faceAt(faceSegs(m, [w]), w, 0.002);
     if (!face) return toast('此處找不到封閉區域（請確認線段有閉合）');
     var a = G.area(face);
     var dup = P.features.filter(function (f) { return Math.abs(G.area(f.pts) - a) < 0.005 && G.pointInPoly(w, f.pts); })[0];
     if (dup) { select({ kind: 'feature', id: dup.id, mapId: m.id }); return toast('此區域已是地上物 ' + dup.code); }
     var f = {
       id: M.uid(), code: M.nextCode(P.features, P.settings.codeScheme), pts: face.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }),
-      landNo: P.fields.landNo || '', note: '', outline: false, dash: false, label: true
+      landNo: P.fields.landNo || '', note: '', outline: false, dash: false, label: true, seeds: [w]
     };
+    f.arcAdj = arcAdj(f.pts);
     P.features.push(f); select({ kind: 'feature', id: f.id, mapId: m.id });
-    changed(); toast('新增地上物 ' + f.code + '：' + a.toFixed(2) + ' m²');
+    changed(); toast('新增地上物 ' + f.code + '：' + R.featureArea(f, 2) + ' m²（Shift+點選相鄰區塊可併入）');
   }
   function finishDraw() {
     var d = App.draw; if (!d) return;
@@ -808,11 +827,12 @@
     if (d.type === 'poly') {
       if (d.pts.length >= 3) {
         var f = { id: M.uid(), code: M.nextCode(P.features, P.settings.codeScheme), pts: d.pts.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }), landNo: P.fields.landNo || '', note: '', outline: true, dash: false, label: true };
+        f.arcAdj = arcAdj(f.pts);
         P.features.push(f); App.draw = null; select({ kind: 'feature', id: f.id, mapId: d.mapId }); changed();
         toast('新增地上物 ' + f.code + '：' + G.area(f.pts).toFixed(2) + ' m²');
       } else { App.draw = null; toast('至少需要 3 點'); }
     } else {
-      for (var i = 0; i + 1 < d.pts.length; i++) P.userLines.push({ x1: round(d.pts[i][0], 4), y1: round(d.pts[i][1], 4), x2: round(d.pts[i + 1][0], 4), y2: round(d.pts[i + 1][1], 4) });
+      for (var i = 0; i + 1 < d.pts.length; i++) P.userLines.push({ role: d.role || 'case', x1: round(d.pts[i][0], 4), y1: round(d.pts[i][1], 4), x2: round(d.pts[i + 1][0], 4), y2: round(d.pts[i + 1][1], 4) });
       App.draw = null; changed();
     }
     App.snapPt = null; render(); refreshPanels();
@@ -874,6 +894,18 @@
       delete P.splits[idx];
       if (first) P.segStyle[String(idx)] = first;
     });
+  }
+  /* 面積配賦：最大餘數法 */
+  function distributeArea(total) {
+    var P = App.P, fs = P.features.filter(function (f) { return !f.hideInTable; });
+    if (!(total > 0) || !fs.length) return toast('請輸入登記總面積');
+    var comp = fs.map(function (f) { return G.area(f.pts) + (f.arcAdj || 0); }), sum = comp.reduce(function (a, b) { return a + b; }, 0);
+    var cents = Math.round(total * 100), raw = comp.map(function (a) { return a / sum * cents; });
+    var fl = raw.map(Math.floor), rest = cents - fl.reduce(function (a, b) { return a + b; }, 0);
+    raw.map(function (r, i) { return [r - fl[i], i]; }).sort(function (a, b) { return b[0] - a[0]; }).slice(0, rest).forEach(function (x) { fl[x[1]]++; });
+    fs.forEach(function (f, i) { f.areaOverride = (fl[i] / 100).toFixed(2); });
+    changed(); render(); renderFeatTab();
+    toast('已配賦：計算合計 ' + sum.toFixed(4) + ' → 登記 ' + total.toFixed(2) + '（差 ' + (total - sum).toFixed(4) + '）', 4500);
   }
   function refreshFeatures() { if (App.tab === 'feat') renderFeatTab(); }
 
@@ -1050,17 +1082,19 @@
     }
     if (s.kind === 'feature' || s.kind === 'flabel') {
       var f = featById(s.id); if (!f) { box.innerHTML = ''; return; }
-      h += '<div class="ptitle">地上物 ' + R.esc(f.code) + '<small>計算面積 ' + G.area(f.pts).toFixed(4) + ' m²</small></div>';
+      h += '<div class="ptitle">地上物 ' + R.esc(f.code) + '<small>計算面積 ' + (G.area(f.pts) + (f.arcAdj || 0)).toFixed(4) + ' m²</small></div>';
       h += '<div class="grid2">' + field('編號', inp('code', f.code)) + field('使用地號', inp('landNo', f.landNo)) + '</div>';
       h += field('備註（如門牌、倉庫）', inp('note', f.note));
+      h += '<div class="grid2">' + field('所有權人', inp('owner', f.owner)) + field('其他（自訂欄）', inp('extra', f.extra)) + '</div>';
       h += field('面積（空白＝自動計算）', inp('areaOverride', f.areaOverride == null ? '' : f.areaOverride, 'text', 'placeholder="' + G.area(f.pts).toFixed(2) + '"'));
       h += '<div class="grid2">' + field('顯示外框', chk('outline', f.outline)) + field('外框線型', dashSel('dash', f.dash)) +
         field('外框線寬', inp('lw', f.lw || P.styles.caseLine.width, 'number', 'step="0.01"')) + field('外框顏色', color('color', f.color || P.styles.caseLine.color)) +
         field('填色', '<span class="row">' + chk('fillOn', !!f.fill) + color('fillColor', f.fill || '#ffcccc') + '</span>') +
         field('顯示編號', chk('label', f.label !== false)) + field('編號字高', inp('labelSize', f.labelSize || P.styles.featureLabel.size, 'number', 'step="0.1"')) +
+        field('編號引線（小區塊用）', chk('leader', f.leader)) +
         field('不列入說明表', chk('hideInTable', f.hideInTable)) + '</div>';
       h += '<div class="btnrow">' + btn('resetLabel', '編號位置重設') + btn('del', '刪除', 'danger') + '</div>';
-      h += '<p class="small">拖曳藍色頂點可修改形狀（會自動鎖點）。</p>';
+      h += '<p class="small">拖曳藍色頂點可修改形狀（會自動鎖點）。用「點選成面」時按住 Shift 點相鄰區塊，可併入此地上物。' + (f.arcAdj ? '（含圓弧修正 ' + f.arcAdj.toFixed(4) + ' m²）' : '') + '</p>';
       box.innerHTML = h;
       bind(box, f, function (k, v) {
         if (k === 'areaOverride' && v === '') f.areaOverride = null;
@@ -1085,6 +1119,8 @@
         field('顏色', color('color', first.color || R.lineStyle(P, isU ? (ul.role || 'case') : R.roleOf(P, lay, 'line'), null).color));
       if (isU) h += field('用途', sel('role', ul.role || 'case', [['case', '現況線'], ['split', '分割線'], ['other', '其他線']])) + field('箭頭', arrowSel('arrow', ul.arrow));
       h += '</div>';
+      h += '<div class="btnrow"><span class="small">快速：</span>' + [['#ff0000', '紅'], ['#0050ff', '藍'], ['#000000', '黑']].map(function (c) { return '<button data-qc="' + c[0] + '" style="color:' + c[0] + '">' + c[1] + '</button>'; }).join('') +
+        '<button data-qd="solid">實線</button><button data-qd="dash">虛線</button></div>';
       h += '<div class="btnrow">' + btn('del', isU ? '刪除' : '隱藏此段', 'danger') + (!isU ? btn('clr', '恢復圖層樣式') : '') + (anySplit ? btn('unsplit', '取消斷線') : '') + '</div>';
       h += '<p class="small">要讓同一條線一半實線、一半虛線：用工具列「斷線(B)」在線上點一下切成兩段，再分別設定。</p>';
       box.innerHTML = h;
@@ -1095,6 +1131,12 @@
         else s.idx.forEach(function (key) { var o = P.segStyle[key] = P.segStyle[key] || {}; if (v == null) delete o[k]; else o[k] = v; });
       });
       box.onclick = function (ev) {
+        var q = ev.target.closest('[data-qc],[data-qd]');
+        if (q) {
+          var k = q.dataset.qc ? 'color' : 'dash', v = q.dataset.qc || q.dataset.qd;
+          if (isU) ul[k] = v; else s.idx.forEach(function (key) { (P.segStyle[key] = P.segStyle[key] || {})[k] = v; });
+          render(); changed(); renderProps(); return;
+        }
         var a = ev.target.closest('[data-act]'); if (!a) return;
         if (a.dataset.act === 'del') deleteSel();
         if (a.dataset.act === 'clr') { s.idx.forEach(function (k) { delete P.segStyle[k]; }); render(); changed(); renderProps(); }
@@ -1140,7 +1182,8 @@
     h += '<p class="small">實地範圍：' + round(el.w / k, 2) + ' × ' + round(el.h / k, 2) + ' 公尺</p>';
     h += '<div class="grid2">' + field('中心 E (TWD97)', inp('cx', el.cx, 'number', 'step="0.001"')) + field('中心 N (TWD97)', inp('cy', el.cy, 'number', 'step="0.001"')) + '</div>';
     h += '<div class="btnrow">' + btn('centerCase', '置中：案件線') + btn('centerTarget', '置中：本案地號') + btn('centerFeat', '置中：地上物') + '</div>';
-    h += '<div class="grid2">' + field('外框', chk('border', el.border !== false)) + field('框下顯示比例尺', chk('scaleLabel', el.scaleLabel)) + field('外框線寬', inp('lw', el.lw || 0.18, 'number', 'step="0.01"')) + field('白底（遮住下層）', chk('bg', el.bg !== false)) + '</div>';
+    h += '<div class="grid2">' + field('文字比例（地號/編號字高倍率）', inp('textScale', el.textScale || 1, 'number', 'step="0.05" min="0.1"')) + '<span></span>' +
+      field('外框', chk('border', el.border !== false)) + field('框下顯示比例尺', chk('scaleLabel', el.scaleLabel)) + field('外框線寬', inp('lw', el.lw || 0.18, 'number', 'step="0.01"')) + field('白底（遮住下層）', chk('bg', el.bg !== false)) + '</div>';
     h += '<div class="btnrow">' + btn('exportDxf', '匯出裁切 DXF', 'primary') + '</div>';
     return h;
   }
@@ -1165,7 +1208,7 @@
     h += '<div class="btnrow">' + btn('merge', '合併儲存格') + btn('split', '取消合併') + '</div>';
     return h;
   }
-  var FT_KEYS = [['code', '編號／名稱'], ['area', '面積'], ['landNo', '地號'], ['note', '備註']];
+  var FT_KEYS = [['code', '編號／名稱'], ['area', '面積'], ['landNo', '地號'], ['note', '備註'], ['owner', '所有權人'], ['extra', '其他(自訂)']];
   function ftableProps(el) {
     var h = '<div class="sec">地上物說明表</div>';
     h += field('標題（列高 0 = 不顯示標題列）', inp('title', el.title)) + field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || ''));
@@ -1183,7 +1226,7 @@
         '<td class="ops"><button data-cop="up">↑</button><button data-cop="down">↓</button><button data-cop="del">✕</button></td></tr>';
     });
     h += '</tbody></table><div class="btnrow">' + btn('colAdd', '新增欄位') + btn('rowsUniform', '資料列高全部一致') + '</div>';
-    h += '<div class="btnrow">' + btn('preset4', '樣式：編號/面積/地號/備註') + btn('preset3', '名稱/面積/地號') + btn('preset2', '編號/坐落面積') + '</div>';
+    h += '<div class="btnrow">' + btn('preset4', '樣式：編號/面積/地號/備註') + btn('preset3', '名稱/面積/地號') + btn('preset2', '編號/坐落面積') + btn('presetOwner', '編號/面積/所有權人') + '</div>';
     h += field('附註文字', ta('notes', el.notes, 3));
     h += '<p class="small">內容由左側「地上物」清單自動產生，修改地上物資料即同步更新。</p>';
     return h;
@@ -1253,9 +1296,14 @@
       var PRESET = {
         preset4: [[{ key: 'code', header: '編號：' }, { key: 'area', header: '面積\n(平方公尺)' }, { key: 'landNo', header: '使用地號：' }, { key: 'note', header: '備註', fs: 3.94 }], [19, 19, 20, 19.9]],
         preset3: [[{ key: 'code', header: '名稱' }, { key: 'area', header: '面積\n( 平方公尺 )' }, { key: 'landNo', header: '地號' }], [20, 33, 23]],
-        preset2: [[{ key: 'code', header: '編號' }, { key: 'area', header: '坐落面積\n( 平方公尺 )' }], [20, 33]]
+        preset2: [[{ key: 'code', header: '編號' }, { key: 'area', header: '坐落面積\n( 平方公尺 )' }], [20, 33]],
+        presetOwner: [[{ key: 'code', header: '編號：' }, { key: 'area', header: '面積\n(平方公尺)', fs: 4.5 }, { key: 'owner', header: '所有權人', fs: 4.5 }], [17, 17, 35]]
       }[act];
-      if (PRESET) { el.columns = clone(PRESET[0]); el.cols = PRESET[1].slice(); if (act !== 'preset4') { el.titleH = 0; el.notesH = 0; } }
+      if (PRESET) {
+        el.columns = clone(PRESET[0]); el.cols = PRESET[1].slice();
+        if (act === 'preset3' || act === 'preset2') { el.titleH = 0; el.notesH = 0; }
+        if (act === 'presetOwner') { el.title = '{landNo}地號分割方案說明：'; el.titleH = el.titleH || 13.3; el.notes = '一、為方便計算，本案已先將{landNo}地號進行合併後展示。\n二、面積計算至平方公分，以平方公尺為單位。'; el.notesH = Math.max(el.notesH, 8.5); }
+      }
     }
     if (el.type === 'map') {
       if (act === 'centerCase') centerMap(el, 'case') || toast('沒有案件線');
@@ -1308,22 +1356,34 @@
   function renderFeatTab() {
     var box = $('#tab-feat'), P = App.P, h = '';
     h += '<div class="btnrow">' + btn('toolFace', '點選成面 (F)', 'primary') + btn('toolPoly', '手繪多邊形 (P)') + '</div>';
-    h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th><th>地號</th><th>備註</th><th></th></tr></thead><tbody>';
+    var LC = P.settings.flistCols || ['landNo', 'note'], LN = { landNo: '地號', note: '備註', owner: '所有權人', extra: '其他' };
+    h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th><th>' + LN[LC[0]] + '</th><th>' + LN[LC[1]] + '</th><th></th></tr></thead><tbody>';
     var total = 0;
     P.features.forEach(function (f, i) {
       var a = parseFloat(R.featureArea(f, 2)) || 0; total += a;
       var on = App.sel && App.sel.id === f.id ? ' class="on"' : '';
       h += '<tr data-fid="' + f.id + '"' + on + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td><td class="num">' + R.featureArea(f, 2) + '</td>' +
-        '<td><input data-f="landNo" value="' + R.esc(f.landNo || '') + '"></td><td><input data-f="note" value="' + R.esc(f.note || '') + '"></td>' +
+        '<td><input data-f="' + LC[0] + '" value="' + R.esc(f[LC[0]] || '') + '"></td><td><input data-f="' + LC[1] + '" value="' + R.esc(f[LC[1]] || '') + '"></td>' +
         '<td class="ops"><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
     });
     h += '</tbody></table>';
-    h += '<p class="small">合計 ' + total.toFixed(2) + ' m²（' + P.features.length + ' 筆）</p>';
+    h += '<p class="small">合計 ' + total.toFixed(2) + ' m²（' + P.features.length + ' 筆）　清單欄位：' +
+      '<select id="flc0">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[0] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select>' +
+      '<select id="flc1">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[1] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select></p>';
+    h += '<div class="sec">面積配賦（分割案）</div><div class="btnrow"><span class="small">登記總面積</span><input id="regArea" type="number" step="0.01" style="width:110px" value="' + (P.settings.regArea || '') + '">' +
+      btn('distribute', '依比例配賦尾差') + btn('undistribute', '清除配賦') + '</div>' +
+      '<p class="small">計算面積加總與登記面積不同時，把差額依面積比例分配到各筆（四捨五入到 0.01，尾差給餘數最大的），結果寫入各筆的「面積」欄，可再手動調整。</p>';
     h += '<div class="btnrow"><span class="small">編號方式</span>' + sel('codeScheme', P.settings.codeScheme || 'alpha', [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']]) + '</div>';
     h += '<div class="btnrow">' + btn('recode', '依序重新編號') + btn('sortCode', '依編號排序') + '</div>';
-    h += '<div class="sec">點選成面設定</div><label class="inline">' + chk('faceWithParcel', P.settings.faceWithParcel) + ' 地籍線也作為邊界（建議開啟）</label>';
+    var FR = P.settings.faceRoles || { parcel: true, case: true, split: true, other: false };
+    h += '<div class="sec">點選成面設定</div><p class="small">作為邊界的線：</p><div class="btnrow">' +
+      [['parcel', '地籍線'], ['case', '現況線'], ['split', '分割線'], ['other', '其他線']].map(function (r) { return '<label class="inline"><input type="checkbox" data-fr="' + r[0] + '"' + (FR[r[0]] ? ' checked' : '') + '>' + r[1] + '</label>'; }).join('') +
+      '</div><p class="small">Shift+點選：把相鄰區塊併入目前選取的地上物（例如跨越原地號界線的分割範圍）。</p>';
     box.innerHTML = h;
     bind(box, P.settings);
+    $$('[data-fr]', box).forEach(function (c) { c.onchange = function () { P.settings.faceRoles = Object.assign({}, FR); P.settings.faceRoles[c.dataset.fr] = c.checked; changed(); }; });
+    ['flc0', 'flc1'].forEach(function (id, i) { $('#' + id, box).onchange = function () { var lc = LC.slice(); lc[i] = this.value; P.settings.flistCols = lc; renderFeatTab(); }; });
+    $('#regArea', box).onchange = function () { P.settings.regArea = this.value; changed(); };
     $$('input[data-f]', box).forEach(function (i) {
       i.addEventListener('input', function () {
         var f = featById(i.closest('tr').dataset.fid); f[i.dataset.f] = i.value; render(); changed();
@@ -1335,6 +1395,8 @@
       if (a) {
         if (a.dataset.act === 'toolFace') setTool('face');
         if (a.dataset.act === 'toolPoly') setTool('poly');
+        if (a.dataset.act === 'distribute') distributeArea(parseFloat($('#regArea', box).value));
+        if (a.dataset.act === 'undistribute') { P.features.forEach(function (f) { f.areaOverride = null; }); changed(); render(); renderFeatTab(); }
         if (a.dataset.act === 'recode') { P.features.forEach(function (f, i) { f.code = M.codeAt(i, P.settings.codeScheme); }); changed(); render(); renderFeatTab(); }
         if (a.dataset.act === 'sortCode') {
           var order = {}; for (var i = 0; i < 300; i++) order[M.codeAt(i, P.settings.codeScheme)] = i;
@@ -1383,6 +1445,7 @@
       field('地上物編號字高', inp('featureLabel.size', S.featureLabel.size, 'number', 'step="0.1"')) + field('地上物編號顏色', color('featureLabel.color', S.featureLabel.color)) +
       field('註記字高', inp('anno.size', S.anno.size, 'number', 'step="0.1"')) + field('略圖字型', sel('mapFont', S.mapFont, [['sans', 'Arial'], ['kai', '標楷體']])) + '</div>';
     h += '<label class="inline">' + chk('autoAvoid', S.autoAvoid !== false) + ' 地號、編號自動避開線條（小幅移動；避不開就留原位，可再手動拖曳）</label>';
+    h += '<label class="inline">' + chk('hideTempNo', S.hideTempNo !== false) + ' 隱藏分割暫編地號（如 641(1)、635(2)）</label>';
     var hiddenN = Object.keys(P.segStyle).filter(function (k) { return P.segStyle[k] && P.segStyle[k].hidden; }).length;
     var hiddenT = Object.keys(P.textOver).filter(function (k) { return P.textOver[k] && P.textOver[k].hidden; }).length;
     if (hiddenN || hiddenT) h += '<div class="btnrow">' + (hiddenN ? btn('showSegs', '顯示被隱藏的線段（' + hiddenN + '）') : '') + (hiddenT ? btn('showTexts', '顯示被隱藏的文字（' + hiddenT + '）') : '') + '</div>';
@@ -1562,7 +1625,8 @@
     var tips = {
       select: '選取：點選/拖曳元件；拖拉格線調整表格', pan: '移動圖面：在略圖框內拖曳以改變裁切位置',
       face: '點選成面：在略圖內點選封閉區域，自動建立地上物並計算面積', poly: '多邊形：逐點點選（自動鎖點），雙擊或 Enter 完成，Esc 取消，Backspace 退一點',
-      line: '畫線：逐點點選，雙擊或 Enter 完成（可設為現況線或分割線，也可用於成面）', break: '斷線：在線段上點一下，把它切成兩段，之後可分別設定線型（例如一段實線、一段虛線）', text: '文字：在略圖內點選＝圖面註記；在略圖外＝版面文字',
+      line: '畫現況線：逐點點選，雙擊或 Enter 完成（畫好後可在右側改線型、顏色）',
+      sline: '畫分割線：逐點點選（自動鎖點），雙擊或 Enter 完成；畫好後可用「點選成面」切出分割範圍', break: '斷線：在線段上點一下，把它切成兩段，之後可分別設定線型（例如一段實線、一段虛線）', text: '文字：在略圖內點選＝圖面註記；在略圖外＝版面文字',
       region: '框選 8K 套印範圍：在版面上拖曳一個矩形'
     };
     $('#toolTip').textContent = tips[t] || '';
@@ -1587,7 +1651,7 @@
     if (ev.key === 'Enter' && App.draw) { finishDraw(); return; }
     if (ev.key === 'Backspace' && App.draw) { App.draw.pts.pop(); if (!App.draw.pts.length) App.draw = null; render(); ev.preventDefault(); return; }
     if (ev.key === 'Delete' || ev.key === 'Backspace') { deleteSel(); ev.preventDefault(); return; }
-    var map = { v: 'select', h: 'pan', f: 'face', p: 'poly', l: 'line', b: 'break', t: 'text', r: 'region' };
+    var map = { v: 'select', h: 'pan', f: 'face', p: 'poly', l: 'line', s: 'sline', b: 'break', t: 'text', r: 'region' };
     if (!ctrl && map[ev.key.toLowerCase()]) { setTool(map[ev.key.toLowerCase()]); return; }
     if (ev.key === '0' && !ctrl) { fitView(); return; }
     if (ev.key.indexOf('Arrow') === 0 && App.sel) {

@@ -162,9 +162,11 @@
     return out;
   }
   function fill(str, fields) {
-    return String(str == null ? '' : str).replace(/\{(\w+)\}/g, function (m, k) {
-      return fields[k] != null ? fields[k] : '';
-    });
+    var out = String(str == null ? '' : str);
+    for (var pass = 0; pass < 3 && /\{\w+\}/.test(out); pass++) {   // 欄位內容本身也可含 {欄位}
+      out = out.replace(/\{(\w+)\}/g, function (m, k) { return fields[k] != null ? fields[k] : ''; });
+    }
+    return out;
   }
 
   /* 自動編號 A..Z, AA.. */

@@ -217,20 +217,21 @@
       for (var e = 0; e < out[v].length; e++) {
         var w = out[v][e];
         if (used[v + '>' + w]) continue;
-        var poly = [], u = v, x = w, guard = 0;
+        var poly = [], ids = [], u = v, x = w, guard = 0;
         while (!used[u + '>' + x] && guard++ < 100000) {
           used[u + '>' + x] = 1;
-          poly.push(nodes[u]);
+          poly.push(nodes[u]); ids.push(u);
           var lst = out[x], idx = lst.indexOf(u);
           var nx = lst[(idx - 1 + lst.length) % lst.length];
           u = x; x = nx;
         }
         if (poly.length >= 3) {
           var sa = signedArea(relative(poly));
-          if (sa > 1e-6) faces.push(poly);
+          if (sa > 1e-6) { poly.ids = ids; faces.push(poly); }
         }
       }
     }
+    faces.nodes = nodes;
     return faces;
   }
   function projT(p, a, b) {
@@ -253,6 +254,73 @@
     }
     return best ? simplify(best) : null;
   }
+  /* 合併多個點所在的面（相鄰面去掉共用邊），回傳外圍多邊形 */
+  function faceUnionAt(segs, pts, tol) {
+    var faces = buildFaces(segs, tol), nodes = faces.nodes, chosen = [];
+    pts.forEach(function (p) {
+      var best = null, bestA = Infinity;
+      faces.forEach(function (f) { if (pointInPoly(p, f)) { var a = area(f); if (a < bestA) { bestA = a; best = f; } } });
+      if (best && chosen.indexOf(best) < 0) chosen.push(best);
+    });
+    if (!chosen.length) return null;
+    if (chosen.length === 1) return simplify(chosen[0]);
+    var edges = {};
+    chosen.forEach(function (f) {
+      for (var i = 0; i < f.ids.length; i++) { var a = f.ids[i], b = f.ids[(i + 1) % f.ids.length]; edges[a + '>' + b] = (edges[a + '>' + b] || 0) + 1; }
+    });
+    var next = {};
+    Object.keys(edges).forEach(function (k) {
+      var ab = k.split('>');
+      if (edges[ab[1] + '>' + ab[0]]) return; // 共用邊
+      (next[ab[0]] = next[ab[0]] || []).push(+ab[1]);
+    });
+    var loops = [], usedE = {};
+    Object.keys(next).forEach(function (st) {
+      next[st].forEach(function (first) {
+        if (usedE[st + '>' + first]) return;
+        var loop = [], u = +st, v = first, g = 0;
+        while (!usedE[u + '>' + v] && g++ < 100000) {
+          usedE[u + '>' + v] = 1; loop.push(nodes[u]);
+          var cand = next[v] || [], nv = null;
+          for (var c = 0; c < cand.length; c++) if (!usedE[v + '>' + cand[c]]) { nv = cand[c]; break; }
+          if (nv === null) break;
+          u = v; v = nv;
+        }
+        if (loop.length >= 3) loops.push(loop);
+      });
+    });
+    if (!loops.length) return null;
+    loops.sort(function (a, b) { return area(b) - area(a); });
+    var res = simplify(loops[0]);
+    res.parts = chosen.length;
+    return res;
+  }
+
+  /* 圓弧修正：多邊形的邊若是圓弧的近似弦，補上弦與弧之間的弓形面積（m²） */
+  function arcCorrection(pts, arcs) {
+    if (!arcs || !arcs.length || pts.length < 3) return 0;
+    var orient = signedArea(relative(pts)) > 0 ? 1 : -1, corr = 0;
+    for (var i = 0; i < pts.length; i++) {
+      var a = pts[i], b = pts[(i + 1) % pts.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < 1e-6) continue;
+      for (var k = 0; k < arcs.length; k++) {
+        var c = arcs[k];
+        if (L > c.chord * 1.05 + 0.001) continue;
+        if (Math.abs(Math.hypot(a[0] - c.cx, a[1] - c.cy) - c.r) > 0.002) continue;
+        if (Math.abs(Math.hypot(b[0] - c.cx, b[1] - c.cy) - c.r) > 0.002) continue;
+        // 弦中點的方位角須在圓弧範圍內
+        var ang = Math.atan2((a[1] + b[1]) / 2 - c.cy, (a[0] + b[0]) / 2 - c.cx) * 180 / Math.PI;
+        while (ang < c.a0 - 1e-9) ang += 360;
+        if (ang > c.a1 + 1e-9) continue;
+        var th = 2 * Math.asin(Math.min(1, L / 2 / c.r)), seg = c.r * c.r / 2 * (th - Math.sin(th));
+        var side = (b[0] - a[0]) * (c.cy - a[1]) - (b[1] - a[1]) * (c.cx - a[0]); // >0 圓心在左
+        corr += (side > 0 ? 1 : -1) * orient * seg;
+        break;
+      }
+    }
+    return corr;
+  }
+
   /* 移除共線中間點 */
   function simplify(pts) {
     var res = pts.slice(), changed = true;
@@ -279,6 +347,6 @@
     signedArea: signedArea, area: function (pts) { return Math.abs(signedArea(relative(pts))); },
     centroid: centroid, pointInPoly: pointInPoly, distToSeg: distToSeg,
     labelPoint: labelPoint, bbox: bbox, clipSeg: clipSeg, clipPoly: clipPoly,
-    segIntersect: segIntersect, buildFaces: buildFaces, faceAt: faceAt, simplify: simplify, median: median
+    segIntersect: segIntersect, buildFaces: buildFaces, faceAt: faceAt, faceUnionAt: faceUnionAt, arcCorrection: arcCorrection, simplify: simplify, median: median
   };
 })(typeof window !== 'undefined' ? window : globalThis);

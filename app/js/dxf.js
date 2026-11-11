@@ -25,7 +25,7 @@
     var raw = text.replace(/\r/g, '').split('\n');
     var pairs = [];
     for (var i = 0; i + 1 < raw.length; i += 2) pairs.push([parseInt(raw[i], 10), raw[i + 1]]);
-    var out = { lines: [], texts: [], layers: {} };
+    var out = { lines: [], texts: [], layers: {}, arcs: [] };
     var section = null, ent = null, poly = null;
 
     function addLayer(l) { out.layers[l] = (out.layers[l] || 0) + 1; }
@@ -57,11 +57,15 @@
           var cx = e[10], cy = e[20], r = e[40] || 0;
           var a0 = e.type === 'CIRCLE' ? 0 : (e[50] || 0), a1 = e.type === 'CIRCLE' ? 360 : (e[51] || 0);
           if (a1 <= a0) a1 += 360;
-          var steps = Math.max(8, Math.ceil((a1 - a0) / 6)), pts = [];
+          // 依弦高誤差 ≤ 0.5 mm 決定分段數，讓面積計算精確
+          var dth = r > 0.0005 ? 2 * Math.acos(Math.max(-1, 1 - 0.0005 / r)) * 180 / Math.PI : 6;
+          var steps = Math.min(2000, Math.max(8, Math.ceil((a1 - a0) / Math.max(dth, 0.01)))), pts = [];
           for (var k = 0; k <= steps; k++) {
             var a = (a0 + (a1 - a0) * k / steps) * Math.PI / 180;
             pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
           }
+          var stepDeg = (a1 - a0) / steps;
+          out.arcs.push({ cx: cx, cy: cy, r: r, a0: a0, a1: a1, chord: 2 * r * Math.sin(stepDeg * Math.PI / 360) });
           pushPoly(L, pts, false); break;
         }
       }

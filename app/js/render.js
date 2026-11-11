@@ -12,6 +12,7 @@
     var f = Object.assign({}, P.fields);
     var maps = P.elements.filter(function (e) { return e.type === 'map'; });
     f.scale = maps[0] ? maps[0].scale : '';
+    f.plan = P.plans && P.plans[P.planIdx] ? P.plans[P.planIdx].name : '';
     maps.forEach(function (m, i) { f['scale' + (i + 1)] = m.scale; });
     return f;
   }
@@ -138,12 +139,14 @@
       var r = rows.length;
       rows.push(el.rowHs[f.id] || el.rowH); kinds.push(f.id);
       cols.forEach(function (col, c) {
-        var v = col.key === 'code' ? f.code : col.key === 'area' ? featureArea(f, el.decimals) : col.key === 'landNo' ? f.landNo : col.key === 'note' ? f.note : (f.extra || {})[col.key];
+        var v = col.key === 'area' ? featureArea(f, el.decimals) : f[col.key];
         cells.push({ r: r, c: c, text: v == null ? '' : String(v), align: col.align || 'center', valign: 'middle', fs: col.fs || el.dataFs, fit: 'shrink', fid: f.id });
       });
     });
     if (el.notesH > 0) {
-      rows.push(el.notesH); kinds.push('notes');
+      var ntext = M.fill(el.notes, F), tw = cols.length ? el.cols.reduce(function (a, b) { return a + b; }, 0) - 1.6 : 50;
+      var need = M.wrap(ntext, tw, el.notesFs, 'kai').length * el.notesFs * 1.12 + 1.6;
+      rows.push(Math.max(el.notesH, need)); kinds.push('notes');
       cells.push({ r: rows.length - 1, c: 0, cs: cols.length, text: M.fill(el.notes, F), align: 'left', valign: 'top', fs: el.notesFs });
     }
     return { cols: el.cols, rows: rows, cells: cells, kinds: kinds };
@@ -151,7 +154,7 @@
 
   function featureArea(f, dec) {
     if (f.areaOverride != null && f.areaOverride !== '') return String(f.areaOverride);
-    return G.area(f.pts).toFixed(dec == null ? 2 : dec);
+    return (G.area(f.pts) + (f.arcAdj || 0)).toFixed(dec == null ? 2 : dec);
   }
 
   function cellRect(el, tm, c) {
@@ -256,7 +259,7 @@
   }
   /* 回傳世界座標下各標籤位置 {feat:{id:[x,y]}, text:{idx:[x,y]}}；手動移動過的不變 */
   function layoutLabels(el, P, cad) {
-    var v = mapView(el), ST = P.styles, font = ST.mapFont, k = v.k, res = { feat: {}, text: {} };
+    var v = mapView(el), ST = P.styles, font = ST.mapFont, k = v.k, res = { feat: {}, text: {} }, TS = el.textScale || 1;
     var auto = ST.autoAvoid !== false;
     var segs = [];
     function addSeg(x1, y1, x2, y2) { var c = G.clipSeg(x1, y1, x2, y2, v.X0, v.Y0, v.X1, v.Y1); if (c) segs.push(c); }
@@ -292,7 +295,7 @@
     P.features.forEach(function (f) {
       if (f.label === false) return;
       if (f.labelAt) { res.feat[f.id] = f.labelAt; return; }
-      res.feat[f.id] = place(G.labelPoint(f.pts), f.code, f.labelSize || ST.featureLabel.size, f.pts);
+      res.feat[f.id] = place(G.labelPoint(f.pts), f.code, (f.labelSize || ST.featureLabel.size) * TS, f.pts);
     });
     if (cad) {
       var order = [];
@@ -301,6 +304,7 @@
         if (role === 'hide') return;
         var ov = P.textOver[idx] || {};
         if (ov.hidden) return;
+        if (ST.hideTempNo !== false && /\(\d+\)$/.test(t.text) && !ov.show) return; // 分割暫編地號如 641(1)
         var x = ov.x != null ? ov.x : t.x, y = ov.y != null ? ov.y : t.y;
         if (x < v.X0 || x > v.X1 || y < v.Y0 || y > v.Y1) return;
         order.push({ idx: idx, t: t, ov: ov, x: x, y: y, role: role });
@@ -310,7 +314,7 @@
         var st = o.role === 'target' ? ST.targetText : o.role === 'parcelNo' ? ST.parcelText : ST.otherText;
         var centered = o.t.h72 === 4 || o.t.h72 === 1 || o.ov.x != null;
         if (o.ov.x != null || !centered || o.t.rot) { res.text[o.idx] = [o.x, o.y]; return; }
-        res.text[o.idx] = place([o.x, o.y], o.t.text, o.ov.size || st.size, null);
+        res.text[o.idx] = place([o.x, o.y], o.t.text, (o.ov.size || st.size) * TS, null);
       });
     }
     lastLayout[el.id] = res;
@@ -325,7 +329,7 @@
       if (!opts.print) s += '<text x="' + n(el.x + el.w / 2) + '" y="' + n(el.y + el.h / 2) + '" font-size="5" text-anchor="middle" fill="#999" font-family="' + esc(M.SANS) + '">請先「匯入 DXF」</text>';
       return s + '</g>';
     }
-    var v = mapView(el), ST = P.styles, font = M.fontFamily(ST.mapFont);
+    var v = mapView(el), ST = P.styles, font = M.fontFamily(ST.mapFont), TS = el.textScale || 1;
     var clipId = 'clip_' + el.id + (opts.print ? '_p' : '');
     s += '<clipPath id="' + clipId + '"><rect x="' + n(el.x) + '" y="' + n(el.y) + '" width="' + n(el.w) + '" height="' + n(el.h) + '"/></clipPath>';
     if (el.bg !== false) s += '<rect x="' + n(el.x) + '" y="' + n(el.y) + '" width="' + n(el.w) + '" height="' + n(el.h) + '" fill="#fff" stroke="none"/>';
@@ -376,7 +380,7 @@
         var role = roleOf(P, t.layer, 'text'), ov = P.textOver[idx] || {};
         var st = role === 'target' ? ST.targetText : role === 'parcelNo' ? ST.parcelText : ST.otherText;
         var q = v.toP(pos[0], pos[1]), centered = t.h72 === 4 || t.h72 === 1 || ov.x != null;
-        s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n(ov.size || st.size) + '" fill="' + (ov.color || st.color) + '" text-anchor="' + (centered ? 'middle' : 'start') +
+        s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((ov.size || st.size) * TS) + '" fill="' + (ov.color || st.color) + '" text-anchor="' + (centered ? 'middle' : 'start') +
           '" dominant-baseline="' + (centered ? 'central' : 'alphabetic') + '" font-family="' + esc(font) + '"' +
           (t.rot ? ' transform="rotate(' + n(-t.rot) + ' ' + n(q[0]) + ' ' + n(q[1]) + ')"' : '') + '>' + esc(t.text) + '</text>';
       });
@@ -385,13 +389,21 @@
     P.features.forEach(function (f) {
       if (f.label === false) return;
       var lp = LY.feat[f.id] || f.labelAt || G.labelPoint(f.pts), q = v.toP(lp[0], lp[1]);
-      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n(f.labelSize || ST.featureLabel.size) + '" fill="' + (f.labelColor || ST.featureLabel.color) +
+      if (f.leader) {
+        var ip = G.labelPoint(f.pts), qi = v.toP(ip[0], ip[1]), dx = qi[0] - q[0], dy = qi[1] - q[1], L = Math.hypot(dx, dy);
+        var r0 = (f.labelSize || ST.featureLabel.size) * TS * 0.6;
+        if (L > r0 + 0.5) {
+          var st = { color: f.labelColor || ST.featureLabel.color, lw: 0.13, dash: 'solid' }, a0 = [q[0] + dx / L * r0, q[1] + dy / L * r0];
+          s += lineSVG(a0, qi, st) + arrowHead(a0, qi, 0.15, st.color);
+        }
+      }
+      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((f.labelSize || ST.featureLabel.size) * TS) + '" fill="' + (f.labelColor || ST.featureLabel.color) +
         '" text-anchor="middle" dominant-baseline="central" font-family="' + esc(font) + '">' + esc(f.code) + '</text>';
     });
     // 圖面註記
     P.annos.forEach(function (a) {
       var q = v.toP(a.x, a.y);
-      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n(a.size || ST.anno.size) + '" fill="' + (a.color || ST.anno.color) +
+      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((a.size || ST.anno.size) * TS) + '" fill="' + (a.color || ST.anno.color) +
         '" text-anchor="middle" dominant-baseline="central" font-family="' + esc(M.fontFamily(a.font || 'kai')) + '"' +
         (a.rot ? ' transform="rotate(' + n(-a.rot) + ' ' + n(q[0]) + ' ' + n(q[1]) + ')"' : '') + '>' + esc(a.text) + '</text>';
     });
