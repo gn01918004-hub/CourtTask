@@ -8,11 +8,11 @@
   /* 案件資料欄位（可在文字中用 {key} 引用） */
   var FIELDS = [
     { group: '機關' },
-    { key: 'office', label: '機關名稱', def: '○○縣○○地政事務所' },
+    { key: 'office', label: '機關名稱', def: '苗栗縣通霄地政事務所', pref: true },
     { key: 'title', label: '圖名', def: '土地複丈成果圖' },
     { group: '土地坐落' },
-    { key: 'county', label: '縣市（如：苗栗縣）', def: '' },
-    { key: 'town', label: '鄉鎮市區（如：通霄鎮）', def: '' },
+    { key: 'county', label: '縣市', def: '苗栗縣', pref: true, list: ['苗栗縣'] },
+    { key: 'town', label: '鄉鎮市區（可下拉或自行輸入）', def: '', pref: true, list: ['通霄鎮', '苑裡鎮'] },
     { key: 'section', label: '段（如：城北段）', def: '' },
     { key: 'subsection', label: '小段', def: '' },
     { key: 'landNo', label: '地號', def: '' },

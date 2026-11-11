@@ -196,3 +196,16 @@ details.fold > summary { cursor: pointer; padding: 6px 0; font-weight: 700; colo
 .lockbar button.on { background: #fff4e5; border-color: #f0a040; color: #8a4b00; }
 table.lockt td, table.lockt th { text-align: center; }
 table.lockt td:first-child, table.lockt th:first-child { text-align: left; }
+
+/* 清冊勾選 */
+label.reg { font-size: 11px; color: var(--muted); margin-right: 2px; white-space: nowrap; }
+label.reg input { vertical-align: middle; }
+/* 清冊列印（A4） */
+.regdoc { font-family: "DFKai-SB", "標楷體", serif; color: #000; }
+.regdoc h1 { text-align: center; font-size: 20pt; margin: 0 0 6mm; letter-spacing: 2pt; }
+.regdoc p { margin: 1mm 0; font-size: 11pt; }
+.regdoc table { width: 100%; border-collapse: collapse; margin-top: 4mm; font-size: 12pt; }
+.regdoc th, .regdoc td { border: 0.3mm solid #000; padding: 2mm 3mm; text-align: center; }
+.regdoc thead { display: table-header-group; }
+.regdoc tr { page-break-inside: avoid; }
+.regdoc .regnote { font-size: 10pt; margin-top: 3mm; }

@@ -64,6 +64,17 @@ const OUT = process.argv[2];
     return { set: t.rows[3], shown: tm.rows[3], totalSet: sum(t.rows), totalShown: sum(tm.rows), fs: c.fs, fit: c.fit || '' };
   });
   check('說明欄自動加高列高、字高不變、總高不變 ' + JSON.stringify(lt), lt.shown > lt.set && lt.totalSet === lt.totalShown && lt.fs === 4.15 && lt.fit === '');
+  // 清冊：勾一筆分割項目列入清冊 → 圖上表格少一筆、多「詳如清冊」列；CSV 有該筆
+  await pg.click('.tabs [data-tab=feat]');
+  const regId = await pg.evaluate(() => App.P.features.find(f => f.ov === 'split').id);
+  await pg.check('[data-reg="' + regId + '"]');
+  const rg = await pg.evaluate((id) => {
+    const ft = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'), tm = Render.tableModel(ft, App.P);
+    const f = App.P.features.find(f => f.id === id);
+    return { inTable: tm.kinds.indexOf(id) >= 0, regRow: tm.kinds.indexOf('register') >= 0, regText: (tm.cells.find(c => /詳如清冊/.test(c.text)) || {}).text, csv: Printer.registerCSV(App.P, ft).indexOf(f.code) >= 0 };
+  }, regId);
+  check('清冊：圖上表格改寫「詳如清冊」、CSV 有資料 ' + JSON.stringify(rg), !rg.inTable && rg.regRow && rg.csv);
+  await pg.uncheck('[data-reg="' + regId + '"]');
   // 分割的面不受現況線影響：split 面積 = 只用地籍線+分割線的面
   const ok = await pg.evaluate(() => {
     const m = App.P.elements.find(e => e.type === 'map'); const f = App.P.features.find(f => f.ov === 'split');

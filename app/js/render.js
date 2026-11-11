@@ -326,12 +326,13 @@
       return { cols: el.cols, rows: rows, cells: cells, kinds: null };
     }
     // 說明表（依說明項目自動產生）
-    var feats = P.features.filter(function (f) {
+    var all = P.features.filter(function (f) {
       if (f.hideInTable) return false;
       if (el.ov && featOv(f) !== el.ov) return false;
       if (el.landFilter) return String(f.landNo) === String(el.landFilter);
       return true;
     });
+    var feats = all.filter(function (f) { return !f.inRegister; }), inReg = all.length - feats.length;   // 列入清冊的不在圖上表格
     var rowsF = [], kinds = [], cellsF = [], cols = el.columns || [], autoF = el.autoRowH !== false;
     if (el.titleH > 0) {
       rowsF.push(el.titleH); kinds.push('title');
@@ -353,11 +354,15 @@
       });
       rowsF.push(autoF ? Math.max(base, Math.round(nd * 100) / 100) : base); kinds.push(f.id);
     });
+    if (inReg > 0) {   // 其餘項目詳如清冊
+      var rr = rowsF.length; rowsF.push(el.rowH); kinds.push('register');
+      cellsF.push({ r: rr, c: 0, cs: cols.length, text: M.fill(el.registerText || '其餘 ' + inReg + ' 筆詳如清冊', F), align: 'center', valign: 'middle', fs: el.dataFs * 0.85, fit: 'shrink' });
+    }
     // 合併儲存格：{ fid: 起始列的說明項目, n: 列數, c: 起始欄, cs: 欄數 }
     (el.merges || []).forEach(function (mg) {
       var r0 = kinds.indexOf(mg.fid); if (r0 < 0) return;
       var n = Math.max(1, Math.min(mg.n || 1, rowsF.length - r0)), cs = Math.max(1, Math.min(mg.cs || 1, cols.length - mg.c));
-      for (var i = r0; i < r0 + n; i++) if (typeof kinds[i] !== 'string' || kinds[i] === 'title' || kinds[i] === 'header' || kinds[i] === 'notes') return;
+      for (var i = r0; i < r0 + n; i++) if (typeof kinds[i] !== 'string' || kinds[i] === 'title' || kinds[i] === 'header' || kinds[i] === 'notes' || kinds[i] === 'register') return;
       var anchor = null;
       cellsF = cellsF.filter(function (c) {
         var inside = c.r >= r0 && c.r < r0 + n && c.c >= mg.c && c.c < mg.c + cs;
@@ -430,6 +435,11 @@
   function renderTable(el, P) {
     var tm = tableModel(el, P), s = '<g data-id="' + el.id + '">';
     var lw = el.lw == null ? 0.24 : el.lw;
+    // 白底：表格放在其他元件上面時，蓋住底下的格線
+    if (el.bg !== false) {
+      var tw = tm.cols.reduce(function (a, b) { return a + b; }, 0), th = tm.rows.reduce(function (a, b) { return a + b; }, 0);
+      s += '<rect x="' + n(el.x) + '" y="' + n(el.y) + '" width="' + n(tw) + '" height="' + n(th) + '" fill="#fff" stroke="none"/>';
+    }
     tm.cells.forEach(function (c) {
       var r = cellRect(el, tm, c);
       if (lw > 0 && !c.noBorder) {

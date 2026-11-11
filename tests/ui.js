@@ -29,6 +29,11 @@ const path = require('path');
   p = await toScreen(50, 100); await pg.mouse.dblclick(p[0], p[1]);
   const dbg = await pg.evaluate(([x, y]) => ({ sel: App.sel, te: App.tableEdit, at: (document.elementFromPoint(x, y) || {}).id || (document.elementFromPoint(x, y) || {}).tagName }), p);
   check('dblclick enters table edit ' + JSON.stringify(dbg), await pg.evaluate(() => !!App.tableEdit));
+  // 真人式雙擊：兩次點擊間隔 150ms（中間畫面會重繪）
+  await pg.keyboard.press('Escape'); await pg.mouse.click(5, 900); await pg.waitForTimeout(500);
+  p = await toScreen(50, 100);
+  await pg.mouse.click(p[0], p[1]); await pg.waitForTimeout(150); await pg.mouse.click(p[0], p[1]);
+  check('真人式雙擊進入表格編輯', await pg.evaluate(() => !!App.tableEdit));
   // 2) 拖拉列分隔線 (第 4 列底 y=44.5+11.4+6.2+6.1+22.9+57.9=149.0)
   const before = await pg.evaluate(() => App.P.elements.find(e => e.type === 'table').rows.slice());
   p = await toScreen(50, 149.0); await pg.mouse.move(p[0], p[1]); await pg.mouse.down();

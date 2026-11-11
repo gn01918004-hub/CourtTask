@@ -80,6 +80,13 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
     const h1 = dr(); App.P.features = []; return [h0, h1];
   });
   check('說明表列高自動 ' + rh.join(' → '), rh[1] > rh[0]);
+  // 預設值：機關、縣市；改過鄉鎮後新案件自動帶入
+  const df0 = await pg.evaluate(() => [App.P.fields.office, App.P.fields.county].join('|'));
+  check('預設機關與縣市 ' + df0, df0 === '苗栗縣通霄地政事務所|苗栗縣');
+  await pg.click('.tabs [data-tab=case]');
+  await pg.fill('#tab-case [data-k=town]', '苑裡鎮'); await pg.dispatchEvent('#tab-case [data-k=town]', 'change');
+  const dl = await pg.evaluate(() => Array.from(document.querySelectorAll('#dl-town option')).map(o => o.value).join(','));
+  check('鄉鎮下拉選項 ' + dl, /通霄鎮/.test(dl) && /苑裡鎮/.test(dl));
   // 甲乙丙
   await pg.evaluate(() => { App.P.settings.codeScheme = 'stem'; });
   const codes = await pg.evaluate(() => [0, 1, 9, 10].map(i => Model.codeAt(i, 'stem')).join(''));

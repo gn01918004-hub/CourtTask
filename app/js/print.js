@@ -71,5 +71,34 @@
     return w.toString();
   }
 
-  global.Printer = { printA3: printA3, print8K: print8K, sheetSVG: sheetSVG, regionSVG: regionSVG, croppedDXF: croppedDXF };
+  /* 清冊：列入清冊的說明項目，A4 直式表格（可多頁，表頭每頁重複） */
+  function registerData(P, ft) {
+    var cols = ft.columns || [], F = R.fieldsOf(P);
+    var items = P.features.filter(function (f) { return f.inRegister && (!ft.ov || (f.ov || 'case') === ft.ov); });
+    var rows = items.map(function (f) { return cols.map(function (c) { var v = c.key === 'area' ? R.featureArea(f, ft.decimals) : f[c.key]; return v == null ? '' : String(v); }); });
+    var title = global.Model.fill(ft.title || '', F).replace(/[:：]\s*$/, '') + '清冊';
+    return { cols: cols, rows: rows, title: title, F: F };
+  }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function printRegister(P, ft) {
+    var d = registerData(P, ft); if (!d.rows.length) return false;
+    var F = d.F, area = document.getElementById('printArea'), st = document.getElementById('pageStyle');
+    st.textContent = '@page{size:210mm 297mm;margin:15mm 15mm 15mm 15mm}';
+    var info = [F.office, (F.county || '') + (F.town || '') + (F.section || '') + (F.subsection ? F.subsection + '小段' : '') + ' ' + (F.landNo ? F.landNo + '地號' : ''), F.courtDoc ? '囑託文號：' + F.courtDoc : ''].filter(Boolean);
+    var h = '<div class="regdoc"><h1>' + esc(d.title) + '</h1>' + info.map(function (t) { return '<p>' + esc(t) + '</p>'; }).join('') +
+      '<table><thead><tr>' + d.cols.map(function (c) { return '<th>' + esc((c.header || '').replace(/[:：]$/, '')).replace(/\n/g, '<br>') + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      d.rows.map(function (r) { return '<tr>' + r.map(function (v) { return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>' +
+      '<p class="regnote">' + esc(global.Model.fill(ft.notes || '', F)).replace(/\n/g, '<br>') + '</p></div>';
+    area.innerHTML = h;
+    setTimeout(function () { window.print(); }, 60);
+    return true;
+  }
+  function registerCSV(P, ft) {
+    var d = registerData(P, ft);
+    var q = function (v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var lines = [d.cols.map(function (c) { return q((c.header || '').replace(/\n/g, '').replace(/[:：]$/, '')); }).join(',')].concat(d.rows.map(function (r) { return r.map(q).join(','); }));
+    return '\ufeff' + lines.join('\r\n');
+  }
+
+  global.Printer = { printRegister: printRegister, registerCSV: registerCSV, registerData: registerData, printA3: printA3, print8K: print8K, sheetSVG: sheetSVG, regionSVG: regionSVG, croppedDXF: croppedDXF };
 })(window);

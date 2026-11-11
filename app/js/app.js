@@ -677,6 +677,18 @@
     }
     var el2 = hitElement(p);
     if (App.tableEdit && (!el2 || el2.id !== App.tableEdit)) { App.tableEdit = null; }   // 點到表格外 → 離開表格編輯
+    // 雙擊：同一元件、0.45 秒內、位置差不多（自己判斷，不依賴瀏覽器的 dblclick）
+    var now = Date.now(), ld = App.lastDown;
+    var isDbl = !!(el2 && ld && ld.id === el2.id && now - ld.t < 450 && Math.hypot(ev.clientX - ld.x, ev.clientY - ld.y) < 8);
+    App.lastDown = el2 ? { id: el2.id, t: now, x: ev.clientX, y: ev.clientY } : null;
+    if (isDbl) {
+      App.lastDown = null;
+      if (el2.type === 'table' || el2.type === 'ftable') {
+        var rc2 = cellAtPoint(el2, p); if (rc2) App.selCell = { r0: rc2.r, c0: rc2.c, r1: rc2.r, c1: rc2.c };
+        select({ kind: 'el', id: el2.id }, true); setTableEdit(el2.id);
+      } else { select({ kind: 'el', id: el2.id }, true); setTimeout(function () { var t = $('#props textarea'); if (t) { t.focus(); t.select(); } }, 0); }
+      return;
+    }
     if (el2) {
       var prevSel = App.sel && App.sel.kind === 'el' && App.sel.id === el2.id;
       var isTbl = el2.type === 'table' || el2.type === 'ftable';
@@ -1716,20 +1728,36 @@
     if (t === 'case') renderCaseTab(); if (t === 'feat') renderFeatTab(); if (t === 'layer') renderLayerTab(); if (t === 'out') renderOutTab();
     render();
   }
+  function getPrefs() { try { return JSON.parse(lsGet('courttask.prefs') || '{}'); } catch (e) { return {}; } }
+  function applyPrefs(P) {
+    var pr = getPrefs();
+    M.FIELDS.forEach(function (f) { if (f.pref && pr[f.key]) P.fields[f.key] = pr[f.key]; });
+  }
+  function savePref(k, v) {
+    var f = M.FIELDS.filter(function (x) { return x.key === k; })[0]; if (!f || !f.pref) return;
+    var pr = getPrefs(); pr[k] = v;
+    if (k === 'town' && v) { pr.towns = (pr.towns || []).filter(function (t) { return t !== v; }); pr.towns.unshift(v); pr.towns = pr.towns.slice(0, 12); }
+    lsSet('courttask.prefs', JSON.stringify(pr));
+  }
   function renderCaseTab() {
-    var box = $('#tab-case'), F = App.P.fields, h = '';
+    var box = $('#tab-case'), F = App.P.fields, h = '', pr = getPrefs();
     h += field('專案名稱（存檔檔名）', inp('caseName', F.caseName || '', 'text', 'placeholder="例：1151110城北486法"'));
     var shortBuf = [];
     function flushShort() { if (shortBuf.length) { h += '<div class="grid3">' + shortBuf.join('') + '</div>'; shortBuf = []; } }
     M.FIELDS.forEach(function (f) {
       if (f.group) { flushShort(); h += '<div class="sec">' + f.group + '</div>'; return; }
-      var html = f.multi ? ta(f.key, F[f.key], 3) : inp(f.key, F[f.key]);
+      var html = f.multi ? ta(f.key, F[f.key], 3) : inp(f.key, F[f.key], 'text', f.list ? 'list="dl-' + f.key + '"' : '');
+      if (f.list) {
+        var opts = f.list.concat(f.key === 'town' ? (pr.towns || []) : []).filter(function (v, i, a) { return a.indexOf(v) === i; });
+        html += '<datalist id="dl-' + f.key + '">' + opts.map(function (o) { return '<option value="' + R.esc(o) + '">'; }).join('') + '</datalist>';
+      }
       if (f.short) shortBuf.push(field(f.label, html)); else { flushShort(); h += field(f.label + ' <code>{' + f.key + '}</code>', html); }
     });
     flushShort();
     h += '<div class="btnrow">' + btn('today', '核定日期填今天') + '</div>';
     box.innerHTML = h;
     bind(box, F);
+    $$('[data-k]', box).forEach(function (i) { i.addEventListener('change', function () { savePref(i.dataset.k, i.value); }); });
     box.onclick = function (ev) {
       var a = ev.target.closest('[data-act]'); if (!a) return;
       if (a.dataset.act === 'today') {
@@ -1758,9 +1786,11 @@
         h += '<tr data-fid="' + f.id + '"' + sel2 + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td>' +
           '<td><input data-f="areaOverride" class="num" placeholder="' + calc + '" value="' + R.esc(f.areaOverride == null ? '' : f.areaOverride) + '" title="空白＝系統計算值；可直接輸入內網計算系統的面積"></td>' +
           '<td><input data-f="' + LC[0] + '" value="' + R.esc(f[LC[0]] || '') + '"></td><td><input data-f="' + LC[1] + '" value="' + R.esc(f[LC[1]] || '') + '"></td>' +
-          '<td class="ops"><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
+          '<td class="ops"><label class="reg" title="列入清冊（圖上表格不列，改寫「詳如清冊」）"><input type="checkbox" data-reg="' + f.id + '"' + (f.inRegister ? ' checked' : '') + '>冊</label><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
       });
       h += '</tbody></table>';
+      var nReg = list.filter(function (f) { return f.inRegister; }).length;
+      h += '<div class="btnrow"><span class="small">勾「冊」＝列入清冊' + (nReg ? '（已勾 ' + nReg + ' 筆）' : '') + '</span>' + (nReg ? '<button data-regprint="' + ov + '">列印清冊</button><button data-regcsv="' + ov + '">清冊 CSV</button>' : '') + '</div>';
       h += '<div class="btnrow"><span class="small">合計 ' + total.toFixed(2) + ' m²（' + list.length + ' 筆）　編號</span>' +
         '<select data-scheme="' + ov + '">' + [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']].map(function (o) { return '<option value="' + o[0] + '"' + (ovScheme(ov) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
         '<button data-recode="' + ov + '">重新編號</button><button data-addrow="' + ov + '" title="只在說明表加一列（不在圖上）">＋空白列</button></div>';
@@ -1787,8 +1817,18 @@
       });
       i.addEventListener('focus', function () { var f = featById(i.closest('tr').dataset.fid); App.sel = { kind: 'feature', id: f.id, mapId: (maps()[0] || {}).id }; renderProps(); render(); });
     });
+    $$('[data-reg]', box).forEach(function (c) { c.onchange = function () { featById(c.dataset.reg).inRegister = c.checked; changed(); render(); renderFeatTab(); }; });
     box.onclick = function (ev) {
       var hd = ev.target.closest('.fbhead[data-ov]'); if (hd) { setActiveOv(hd.dataset.ov); return; }
+      var rp = ev.target.closest('[data-regprint],[data-regcsv]');
+      if (rp) {
+        var rov = rp.dataset.regprint || rp.dataset.regcsv;
+        var ft = P.elements.filter(function (e) { return e.type === 'ftable' && (e.ov === rov || !e.ov); })[0] || P.elements.filter(function (e) { return e.type === 'ftable'; })[0];
+        if (!ft) return toast('沒有說明表');
+        if (rp.dataset.regcsv) download((P.fields.caseName || '清冊') + '_' + (rov === 'split' ? '分割' : '現況') + '清冊.csv', Printer.registerCSV(P, ft), 'text/csv');
+        else { checkpoint(); Printer.printRegister(P, ft) || toast('沒有勾選列入清冊的項目'); }
+        return;
+      }
       var rc = ev.target.closest('[data-recode]');
       if (rc) { ovFeatures(rc.dataset.recode).forEach(function (f, i) { f.code = M.codeAt(i, ovScheme(rc.dataset.recode)); }); changed(); render(); renderFeatTab(); return; }
       var ar = ev.target.closest('[data-addrow]');
@@ -2031,7 +2071,7 @@
       var v = ($('input[name=tpl]:checked', list) || {}).value;
       var tpl = v === '__builtin' ? null : v === '__current' ? templateData() : t[v];
       checkpoint();
-      App.P = upgrade(M.newProject(tpl)); App.cad = null; App.planCads = [null]; fileHandle = null;
+      App.P = upgrade(M.newProject(tpl)); applyPrefs(App.P); App.cad = null; App.planCads = [null]; fileHandle = null;
       App.undo = []; App.redo = []; App.lastSnap = snap(); App.sel = null;
       dlg.close(); refreshAll(); fitView(); switchTab('case'); autosave();
     };
@@ -2151,13 +2191,7 @@
     document.addEventListener('pointerdown', function (ev) { if (!ev.target.closest('#ctx')) closeCtx(); }, true);
     $('#lockBar').addEventListener('click', function (ev) { var b = ev.target.closest('[data-lockq]'); if (b) setLock(b.dataset.lockq, !isLocked(b.dataset.lockq)); });
     $('#assignBar').addEventListener('click', function (ev) { var b = ev.target.closest('[data-assign]'); if (b) { App.assignTo = b.dataset.assign; renderAssignBar(); } });
-    svg.addEventListener('dblclick', function (ev) {
-      if (App.tool === 'select' && App.sel && App.sel.kind === 'el') {
-        var de = elById(App.sel.id);
-        if (de && (de.type === 'table' || de.type === 'ftable')) { setTableEdit(de.id); return; }
-        var ta2 = $('#props textarea'); if (ta2) { ta2.focus(); ta2.select(); }
-      }
-    });
+    // 雙擊改由 onDown 自行判斷（見上方 isDbl）
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', function (ev) { if (ev.key === ' ') { App.space = false; stage.classList.remove('grab'); } });
     window.addEventListener('resize', render);
@@ -2205,6 +2239,7 @@
       select({ kind: 'el', id: el.id }); renderLayerList();
     });
 
+    applyPrefs(App.P);
     App.lastSnap = snap();
     setTool('select');
     switchTab('case');
