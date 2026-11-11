@@ -14,6 +14,11 @@
     f.scale = maps[0] ? maps[0].scale : '';
     f.plan = P.plans && P.plans[P.planIdx] ? P.plans[P.planIdx].name : '';
     maps.forEach(function (m, i) { f['scale' + (i + 1)] = m.scale; });
+    // 去掉行政區字尾，讓「縣／市」「鄉鎮／市區」「段」固定在自己的格子
+    f.countyName = String(f.county || '').trim().replace(/[縣市]$/, '');
+    f.townName = String(f.town || '').trim().replace(/(鄉|鎮|市|區)$/, '');
+    f.sectionName = String(f.section || '').trim().replace(/段$/, '');
+    f.subsectionName = String(f.subsection || '').trim().replace(/小段$/, '');
     return f;
   }
 
@@ -304,12 +309,13 @@
       cols.forEach(function (c, i) { cells.push({ r: hr, c: i, text: c.header || '', align: 'center', valign: 'middle', fs: el.headerFs, fit: 'shrink' }); });
     }
     feats.forEach(function (f) {
-      var r = rows.length;
-      rows.push(el.rowHs[f.id] || el.rowH); kinds.push(f.id);
+      var r = rows.length, base = el.rowHs[f.id] || el.rowH, need = 0;
       cols.forEach(function (col, c) {
-        var v = col.key === 'area' ? featureArea(f, el.decimals) : f[col.key];
-        cells.push({ r: r, c: c, text: v == null ? '' : String(v), align: col.align || 'center', valign: 'middle', fs: col.fs || el.dataFs, fit: 'shrink', fid: f.id });
+        var v = col.key === 'area' ? featureArea(f, el.decimals) : f[col.key], txt = v == null ? '' : String(v), fs = col.fs || el.dataFs;
+        cells.push({ r: r, c: c, text: txt, align: col.align || 'center', valign: 'middle', fs: fs, fit: el.autoRowH ? '' : 'shrink', fid: f.id });
+        if (el.autoRowH && txt) need = Math.max(need, M.wrap(txt, (el.cols[c] || 10) - 1.6, fs, 'kai').length * fs * 1.12 + 1.6);
       });
+      rows.push(el.autoRowH ? Math.max(base, Math.round(need * 100) / 100) : base); kinds.push(f.id);
     });
     if (el.notesH > 0) {
       var ntext = M.fill(el.notes, F), tw = cols.length ? el.cols.reduce(function (a, b) { return a + b; }, 0) - 1.6 : 50;
@@ -374,7 +380,14 @@
     var lw = el.lw == null ? 0.24 : el.lw;
     tm.cells.forEach(function (c) {
       var r = cellRect(el, tm, c);
-      if (lw > 0 && !c.noBorder) s += '<rect x="' + n(r.x) + '" y="' + n(r.y) + '" width="' + n(r.w) + '" height="' + n(r.h) + '" fill="none" stroke="#000" stroke-width="' + lw + '"/>';
+      if (lw > 0 && !c.noBorder) {
+        if (c.hideL || c.hideR) {
+          var ln = function (x1, y1, x2, y2) { return '<line x1="' + n(x1) + '" y1="' + n(y1) + '" x2="' + n(x2) + '" y2="' + n(y2) + '" stroke="#000" stroke-width="' + lw + '"/>'; };
+          s += ln(r.x, r.y, r.x + r.w, r.y) + ln(r.x, r.y + r.h, r.x + r.w, r.y + r.h);
+          if (!c.hideL) s += ln(r.x, r.y, r.x, r.y + r.h);
+          if (!c.hideR) s += ln(r.x + r.w, r.y, r.x + r.w, r.y + r.h);
+        } else s += '<rect x="' + n(r.x) + '" y="' + n(r.y) + '" width="' + n(r.w) + '" height="' + n(r.h) + '" fill="none" stroke="#000" stroke-width="' + lw + '"/>';
+      }
       if (c.text) s += textBlock(r.x, r.y, r.w, r.h, c.text, c);
     });
     // 沒有內容定義的格子也畫框線
@@ -415,6 +428,50 @@
   function featColor(P, f) { return P.styles.featureLabelByLayer === false ? P.styles.featureLabel.color : roleStyle(P, featOv(f)).color; }
   function visFeatures(P) { return P.features.filter(function (f) { return featVisible(P, f); }); }
 
+  /* 略圖框的文字比例：編號、本案地號、非本案地號分開設定（舊版的 textScale 為共同預設） */
+  function textScales(el) {
+    var b = el.textScale || 1;
+    return { feat: el.tsFeat || b, target: el.tsTarget || b, parcel: el.tsParcel || b };
+  }
+  /* 本案範圍：地上物＋本案地號所在地塊（給非本案地號避開用） */
+  function caseAreas(P, cad, v) {
+    var polys = [];
+    visFeatures(P).forEach(function (f) { polys.push(f.pts); });
+    if (cad) {
+      var key = JSON.stringify(P.layerRoles || {}) + '|' + cad.lines.length + '|' + cad.texts.length;
+      if (!cad._tgt || cad._tgt.key !== key) {
+        var res = [];
+        var tg = cad.texts.filter(function (t) { return roleOf(P, t.layer, 'text') === 'target' && !/\(\d+\)$/.test(t.text); });
+        if (tg.length && tg.length <= 30) {
+          var bb = G.bbox(tg.map(function (t) { return [t.x, t.y]; })), pad = 400, segs = [];
+          bb = [bb[0] - pad, bb[1] - pad, bb[2] + pad, bb[3] + pad];
+          eachPiece(P, cad, function (pc, role) {
+            if (role !== 'parcel') return;
+            var c = G.clipSeg(pc.x1, pc.y1, pc.x2, pc.y2, bb[0], bb[1], bb[2], bb[3]); if (c) segs.push(c);
+          });
+          var faces = G.buildFaces(segs, 0.002);
+          tg.forEach(function (t) {
+            var best = null, ba = Infinity;
+            faces.forEach(function (f) { if (G.pointInPoly([t.x, t.y], f)) { var a = G.area(f); if (a < ba) { ba = a; best = f; } } });
+            if (best && ba < 2e6) res.push(best);
+          });
+        }
+        cad._tgt = { key: key, polys: res };
+      }
+      polys = polys.concat(cad._tgt.polys);
+    }
+    return polys.map(function (p) { return { pts: p, bb: G.bbox(p) }; });
+  }
+  function boxInAreas(box, areas) {
+    for (var i = 0; i < areas.length; i++) {
+      var a = areas[i], b = a.bb;
+      if (b[2] < box[0] || b[0] > box[2] || b[3] < box[1] || b[1] > box[3]) continue;
+      var cs = [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]], [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2]];
+      for (var j = 0; j < cs.length; j++) if (G.pointInPoly(cs[j], a.pts)) return true;
+    }
+    return false;
+  }
+
   /* ---------- 標籤自動避開線條 ---------- */
   function boxHits(box, segs, boxes) {
     var h = 0;
@@ -431,7 +488,7 @@
   }
   /* 回傳世界座標下各標籤位置 {feat:{id:[x,y]}, text:{idx:[x,y]}}；手動移動過的不變 */
   function layoutLabels(el, P, cad) {
-    var v = mapView(el), ST = P.styles, font = ST.mapFont, k = v.k, res = { feat: {}, text: {} }, TS = el.textScale || 1;
+    var v = mapView(el), ST = P.styles, font = ST.mapFont, k = v.k, res = { feat: {}, text: {} }, TSc = textScales(el);
     var auto = ST.autoAvoid !== false;
     var segs = [];
     function addSeg(x1, y1, x2, y2) { var c = G.clipSeg(x1, y1, x2, y2, v.X0, v.Y0, v.X1, v.Y1); if (c) segs.push(c); }
@@ -443,19 +500,21 @@
         for (var i = 0; i < f.pts.length; i++) { var a = f.pts[i], b = f.pts[(i + 1) % f.pts.length]; addSeg(a[0], a[1], b[0], b[1]); }
       });
     }
-    var placed = [];
-    function place(anchor, text, size, poly) {
+    var placed = [], areas = auto && ST.avoidCase !== false ? caseAreas(P, cad, v) : [];
+    function place(anchor, text, size, poly, isOther) {
       var hw = M.measure(text, size, font) / 2 / k * 1.05, hh = size * 0.42 / k;
       function boxAt(x, y) { return [x - hw, y - hh, x + hw, y + hh]; }
-      var b0 = boxAt(anchor[0], anchor[1]), base = boxHits(b0, segs, placed);
+      // 非本案地號壓到本案範圍（地上物、本案地塊）時加重扣分
+      function score(b) { return boxHits(b, segs, placed) * 1000 + (isOther && areas.length && boxInAreas(b, areas) ? 6000 : 0); }
+      var b0 = boxAt(anchor[0], anchor[1]), base = score(b0);
       if (!auto || base === 0) { placed.push(b0); return anchor; }
-      var best = anchor, bestS = base * 1000, maxR = size * 1.1 / k; // 最多移動約 1 個字高
-      for (var ri = 1; ri <= 6; ri++) {
-        var r = maxR * ri / 6;
+      var best = anchor, bestS = base, maxR = size * (isOther ? 2.2 : 1.1) / k; // 一般只移約 1 個字高；非本案地號可再遠一點
+      for (var ri = 1; ri <= 8; ri++) {
+        var r = maxR * ri / 8;
         for (var ai = 0; ai < 16; ai++) {
           var ang = (ai + (ri % 2) * 0.5) * Math.PI / 8;
           var x = anchor[0] + Math.cos(ang) * r, y = anchor[1] + Math.sin(ang) * r * 0.8;
-          var sc = boxHits(boxAt(x, y), segs, placed) * 1000 + r * k * 10;
+          var sc = score(boxAt(x, y)) + r * k * 10;
           if (poly && !G.pointInPoly([x, y], poly)) sc += 600;
           if (sc < bestS) { bestS = sc; best = [x, y]; }
         }
@@ -467,7 +526,7 @@
     visFeatures(P).forEach(function (f) {
       if (f.label === false) return;
       if (f.labelAt) { res.feat[f.id] = f.labelAt; return; }
-      res.feat[f.id] = place(G.labelPoint(f.pts), f.code, (f.labelSize || ST.featureLabel.size) * TS, f.pts);
+      res.feat[f.id] = place(G.labelPoint(f.pts), f.code, (f.labelSize || ST.featureLabel.size) * TSc.feat, f.pts);
     });
     if (cad) {
       var order = [];
@@ -486,7 +545,7 @@
         var st = o.role === 'target' ? ST.targetText : o.role === 'parcelNo' ? ST.parcelText : ST.otherText;
         var centered = o.t.h72 === 4 || o.t.h72 === 1 || o.ov.x != null;
         if (o.ov.x != null || !centered || o.t.rot) { res.text[o.idx] = [o.x, o.y]; return; }
-        res.text[o.idx] = place([o.x, o.y], o.t.text, (o.ov.size || st.size) * TS, null);
+        res.text[o.idx] = place([o.x, o.y], o.t.text, (o.ov.size || st.size) * (o.role === 'target' ? TSc.target : TSc.parcel), null, o.role !== 'target');
       });
     }
     lastLayout[el.id] = res;
@@ -501,7 +560,7 @@
       if (!opts.print) s += '<text x="' + n(el.x + el.w / 2) + '" y="' + n(el.y + el.h / 2) + '" font-size="5" text-anchor="middle" fill="#999" font-family="' + esc(M.SANS) + '">請先「匯入 DXF」</text>';
       return s + '</g>';
     }
-    var v = mapView(el), ST = P.styles, font = M.fontFamily(ST.mapFont), TS = el.textScale || 1;
+    var v = mapView(el), ST = P.styles, font = M.fontFamily(ST.mapFont), TSc = textScales(el);
     var clipId = 'clip_' + el.id + (opts.print ? '_p' : '');
     s += '<clipPath id="' + clipId + '"><rect x="' + n(el.x) + '" y="' + n(el.y) + '" width="' + n(el.w) + '" height="' + n(el.h) + '"/></clipPath>';
     if (el.bg !== false) s += '<rect x="' + n(el.x) + '" y="' + n(el.y) + '" width="' + n(el.w) + '" height="' + n(el.h) + '" fill="#fff" stroke="none"/>';
@@ -564,7 +623,7 @@
         var role = roleOf(P, t.layer, 'text'), ov = P.textOver[idx] || {};
         var st = role === 'target' ? ST.targetText : role === 'parcelNo' ? ST.parcelText : ST.otherText;
         var q = v.toP(pos[0], pos[1]), centered = t.h72 === 4 || t.h72 === 1 || ov.x != null;
-        s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((ov.size || st.size) * TS) + '" fill="' + (ov.color || st.color) + '" text-anchor="' + (centered ? 'middle' : 'start') +
+        s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((ov.size || st.size) * (role === 'target' ? TSc.target : TSc.parcel)) + '" fill="' + (ov.color || st.color) + '" text-anchor="' + (centered ? 'middle' : 'start') +
           '" dominant-baseline="' + (centered ? 'central' : 'alphabetic') + '" font-family="' + esc(font) + '"' +
           (t.rot ? ' transform="rotate(' + n(-t.rot) + ' ' + n(q[0]) + ' ' + n(q[1]) + ')"' : '') + '>' + esc(t.text) + '</text>';
       });
@@ -575,19 +634,19 @@
       var lp = LY.feat[f.id] || f.labelAt || G.labelPoint(f.pts), q = v.toP(lp[0], lp[1]);
       if (f.leader) {
         var ip = G.labelPoint(f.pts), qi = v.toP(ip[0], ip[1]), dx = qi[0] - q[0], dy = qi[1] - q[1], L = Math.hypot(dx, dy);
-        var r0 = (f.labelSize || ST.featureLabel.size) * TS * 0.6;
+        var r0 = (f.labelSize || ST.featureLabel.size) * TSc.feat * 0.6;
         if (L > r0 + 0.5) {
           var st = { color: f.labelColor || featColor(P, f), lw: 0.13, dash: 'solid' }, a0 = [q[0] + dx / L * r0, q[1] + dy / L * r0];
           s += lineSVG(a0, qi, st) + arrowHead(a0, qi, 0.15, st.color);
         }
       }
-      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((f.labelSize || ST.featureLabel.size) * TS) + '" fill="' + (f.labelColor || featColor(P, f)) +
+      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((f.labelSize || ST.featureLabel.size) * TSc.feat) + '" fill="' + (f.labelColor || featColor(P, f)) +
         '" text-anchor="middle" dominant-baseline="central" font-family="' + esc(font) + '">' + esc(f.code) + '</text>';
     });
     // 圖面註記
     P.annos.forEach(function (a) {
       var q = v.toP(a.x, a.y);
-      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((a.size || ST.anno.size) * TS) + '" fill="' + (a.color || ST.anno.color) +
+      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((a.size || ST.anno.size) * TSc.feat) + '" fill="' + (a.color || ST.anno.color) +
         '" text-anchor="middle" dominant-baseline="central" font-family="' + esc(M.fontFamily(a.font || 'kai')) + '"' +
         (a.rot ? ' transform="rotate(' + n(-a.rot) + ' ' + n(q[0]) + ' ' + n(q[1]) + ')"' : '') + '>' + esc(a.text) + '</text>';
     });
@@ -660,6 +719,6 @@
     esc: esc, renderSheet: renderSheet, renderElement: renderElement, renderGhost: renderGhost, mapView: mapView,
     tableModel: tableModel, cellRect: cellRect, bounds: bounds, roleOf: roleOf, defaultRole: defaultRole,
     featureArea: featureArea, fieldsOf: fieldsOf, pieces: pieces, eachPiece: eachPiece, lineStyle: lineStyle, roleStyle: roleStyle,
-    DASH_LIST: DASH_LIST, updateBoth: updateBoth, mergeInfo: mergeInfo, detectMerge: detectMerge, parseParcels: parseParcels, featOv: featOv, visFeatures: visFeatures, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
+    DASH_LIST: DASH_LIST, textScales: textScales, updateBoth: updateBoth, mergeInfo: mergeInfo, detectMerge: detectMerge, parseParcels: parseParcels, featOv: featOv, visFeatures: visFeatures, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -10,15 +10,15 @@ const OUT = process.argv[2];
   const check = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) errs.push(n); };
   await pg.goto('file://' + path.join(__dirname, '..', 'app', 'index.html'));
   await pg.evaluate(() => { window.print = () => {}; });
-  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('[data-cmd=import]')]);
+  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnImport')]);
   await fc.setFiles(path.join(__dirname, '..', 'samples', '641', 'plan3_1140822.dxf'));
   await pg.waitForFunction(() => App.cad && App.cad.lines.length > 9000);
   const official = { A: 2117.49, B: 2229.36, C: 3713.67, D: 2610.87, E: 3914.43, F1: 1867.13, G: 1572.06, H: 1142.36, I: 1713.54, J: 5711.80, K: 7259.97, L: 1893.86, F2: 573.59, M: 3157.94, N: 702.58, O: 944.29 };
   const res = await pg.evaluate((official) => {
     const P = App.P, m = P.elements.find(e => e.type === 'map');
-    Object.assign(P.fields, { office: '苗栗縣通霄地政事務所', title: '土地複丈成果圖 ({plan})', county: '苗栗', town: '苑裡', section: '中溝', landNo: '641、643、646' });
+    Object.assign(P.fields, { office: '苗栗縣通霄地政事務所', title: '土地複丈成果圖 ({plan})', county: '苗栗縣', town: '苑裡鎮', section: '中溝段', section: '中溝', landNo: '641、643、646' });
     P.plans[0].name = '方案三';
-    P.activeOv = 'split'; m.scale = 2000; m.textScale = 0.4; App.api.centerMap(m, 'auto');
+    P.activeOv = 'split'; m.scale = 2000; m.tsFeat = 0.5; m.tsTarget = 0.5; m.tsParcel = 0.3; App.api.centerMap(m, 'auto');
     const codes = Object.keys(official);
     App.cad.texts.filter(t => t.layer === 'PAR_2').forEach((t, i) => { App.api.addFaceAt(m, [t.x, t.y]); });
     P.features.forEach((f, i) => { f.code = codes[i]; f.owner = '所有權人' + (i + 1); f.landNo = ''; });
@@ -45,6 +45,20 @@ const OUT = process.argv[2];
   check('Shift 併入 A+B = 4346.85 (' + u + ')', Math.abs(u - (2117.49 + 2229.36)) < 0.02);
   await pg.evaluate(() => { App.P.features.splice(1, 1); App.api.selectFn(null); App.api.render(); });
   await pg.waitForTimeout(300);
+  // 非本案地號不壓在本案範圍（說明項目）上
+  const inside = await pg.evaluate(() => {
+    const m = App.P.elements.find(e => e.type === 'map'), ly = Render.layoutLabels(m, App.P, App.cad), out = [];
+    Object.keys(ly.text).forEach(k => {
+      const t = App.cad.texts[k]; if (Render.roleOf(App.P, t.layer, 'text') !== 'parcelNo') return;
+      const p = ly.text[k], inF = q => App.P.features.some(f => Geom.pointInPoly(q, f.pts));
+      if (inF(p) && !inF([t.x, t.y])) out.push(t.text);   // 原本在外面卻被移進本案範圍
+    });
+    return out;
+  });
+  check('非本案地號不會被移進本案範圍 (' + inside.join(',') + ')', inside.length === 0);
+  // 左上角：苗栗縣 → 「苗栗」＋「縣／市」
+  const cty = await pg.evaluate(() => { const f = Render.fieldsOf(App.P); return [f.countyName, f.townName, f.sectionName].join('|'); });
+  check('縣市名稱去字尾 ' + cty, cty === '苗栗|苑裡|中溝');
   if (OUT) {
     await pg.screenshot({ path: path.join(OUT, 'case641.png') });
     await pg.evaluate(() => { document.getElementById('printArea').innerHTML = '<div class="printPage" style="width:420mm;height:297mm">' + Printer.sheetSVG(App.P, App.cad) + '</div>'; });

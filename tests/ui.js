@@ -7,7 +7,7 @@ const path = require('path');
   const errs = []; pg.on('pageerror', e => errs.push(e.message));
   await pg.goto('file://' + path.join(__dirname, '..', 'app', 'index.html'));
   await pg.evaluate(() => { try { localStorage.clear(); } catch (e) {} window.confirm = () => true; window.print = () => { window.__printed = document.getElementById('printArea').innerHTML.length; }; });
-  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('[data-cmd=import]')]);
+  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnImport')]);
   await fc.setFiles([path.join(__dirname, '..', 'samples', '486.dxf')]);
   await pg.waitForTimeout(500);
   const toScreen = (x, y) => pg.evaluate(([x, y]) => { const r = document.getElementById('svg').getBoundingClientRect(); return [r.left + (x - App.view.ox) * App.view.z, r.top + (y - App.view.oy) * App.view.z]; }, [x, y]);
@@ -17,6 +17,17 @@ const path = require('path');
   let p = await toScreen(50, 100); await pg.mouse.click(p[0], p[1]);
   let st = await pg.evaluate(() => ({ sel: App.sel, cell: App.selCell }));
   check('select table cell', st.sel && st.cell && st.cell.r0 === 4 && st.cell.c0 === 1);
+  // 1b) 未進入表格編輯：在格線上拖曳 = 移動整個表格（不會誤拉格線）
+  const t0 = await pg.evaluate(() => { const t = App.P.elements.find(e => e.type === 'table'); return [t.x, t.y, t.rows[4]]; });
+  p = await toScreen(50, 149.0); await pg.mouse.move(p[0], p[1]); await pg.mouse.down();
+  let q0 = await toScreen(50, 139.0); await pg.mouse.move(q0[0], q0[1], { steps: 5 }); await pg.mouse.up();
+  const t1 = await pg.evaluate(() => { const t = App.P.elements.find(e => e.type === 'table'); return [t.x, t.y, t.rows[4]]; });
+  check('drag on table border moves table, not divider (' + t0 + ' → ' + t1 + ')', t1[2] === t0[2] && Math.abs(t1[1] - t0[1] + 10) < 1.5);
+  await pg.keyboard.press('Control+z'); await pg.waitForTimeout(500);
+  await pg.evaluate(() => { const t = App.P.elements.find(e => e.type === 'table'); t.x = 20.7; t.y = 44.5; App.api.render(); });
+  // 雙擊進入表格編輯
+  p = await toScreen(50, 100); await pg.mouse.dblclick(p[0], p[1]);
+  check('dblclick enters table edit', await pg.evaluate(() => !!App.tableEdit));
   // 2) 拖拉列分隔線 (第 4 列底 y=44.5+11.4+6.2+6.1+22.9+57.9=149.0)
   const before = await pg.evaluate(() => App.P.elements.find(e => e.type === 'table').rows.slice());
   p = await toScreen(50, 149.0); await pg.mouse.move(p[0], p[1]); await pg.mouse.down();
@@ -28,7 +39,7 @@ const path = require('path');
   p = await toScreen(60, 250); await pg.keyboard.down('Shift'); await pg.mouse.click(p[0], p[1]); await pg.keyboard.up('Shift');
   await pg.click('[data-act=merge]');
   const merged = await pg.evaluate(() => App.P.elements.find(e => e.type === 'table').cells.find(c => c.r === 8 && c.c === 0));
-  check('merge cells', merged && merged.cs === 2);
+  check('merge cells (auto-expand to merged cell) cs=' + (merged && merged.cs), merged && merged.cs === 5);
   // 4) 拖曳指北針
   const nb = await pg.evaluate(() => { const e = App.P.elements.find(e => e.type === 'north'); return [e.x, e.y]; });
   p = await toScreen(nb[0] + 4.75, nb[1] + 20); await pg.mouse.move(p[0], p[1]); await pg.mouse.down();
@@ -55,12 +66,12 @@ const path = require('path');
   const fz = await pg.evaluate(() => App.P.features.length);
   check('undo face', fz === 0);
   // 8) 新增第二個略圖框並改比例尺
-  await pg.click('[data-cmd=add-map]');
+  await pg.click('#rail .dd .ddbtn'); await pg.click('[data-cmd=add-map]');
   await pg.fill('[data-k=scale]', '1000');
   const m2 = await pg.evaluate(() => App.P.elements.filter(e => e.type === 'map').map(m => m.scale));
   check('second map 1/1000 ' + m2, m2.length === 2 && m2[1] === 1000);
   // 9) 列印按鈕
-  await pg.click('[data-cmd=printA3]'); await pg.waitForTimeout(200);
+  await pg.click('#toolbar [data-cmd=printA3]'); await pg.waitForTimeout(200);
   check('print A3 builds page', (await pg.evaluate(() => window.__printed)) > 1000);
   if (process.argv[2]) await pg.screenshot({ path: process.argv[2] });
   console.log('errors:', errs.length ? errs : 'none');

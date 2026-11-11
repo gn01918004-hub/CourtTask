@@ -6,8 +6,8 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); }
-#app { display: grid; height: 100vh; grid-template-columns: 300px 1fr 320px; grid-template-rows: auto 1fr 26px;
-  grid-template-areas: "top top top" "left stage right" "status status status"; }
+#app { display: grid; height: 100vh; grid-template-columns: 300px 54px 1fr 320px; grid-template-rows: auto 1fr 28px;
+  grid-template-areas: "top top top top" "left rail stage right" "status status status status"; }
 button { font: inherit; border: 1px solid var(--line); background: #fff; color: var(--text); border-radius: 5px; padding: 4px 9px; cursor: pointer; }
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -80,8 +80,7 @@ table.flist td:first-child input { width: 38px; }
 #stage[data-tool=pan] svg { cursor: move; }
 #stage[data-tool=text] svg { cursor: text; }
 #svg { width: 100%; height: 100%; display: block; user-select: none; touch-action: none; }
-#toolTip { position: absolute; left: 10px; top: 8px; background: rgba(18, 53, 91, .85); color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 12px; pointer-events: none; }
-#toolTip:empty { display: none; }
+#toolTip { color: #12355b; font-weight: 600; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-right: 16px; }
 
 #status { grid-area: status; display: flex; justify-content: space-between; padding: 4px 10px; background: #fff; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
@@ -127,3 +126,44 @@ dialog ol { line-height: 1.7; padding-left: 20px; }
 .sw { display: inline-block; width: 10px; height: 10px; border: 1px solid #999; vertical-align: middle; margin-right: 3px; }
 tr.sub td { color: var(--muted); font-size: 12px; }
 td input.num { text-align: right; }
+
+/* ---------- v1.2 介面 ---------- */
+#toolbar { flex-wrap: nowrap; overflow-x: auto; }
+#toolbar .brand small { font-weight: 400; color: var(--muted); }
+#status { gap: 10px; }
+#status #coord { white-space: nowrap; }
+
+/* 直列工具列 */
+#rail { grid-area: rail; background: #f6f8fa; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; overflow-y: auto; }
+#rail button, #rail .ddbtn { width: 46px; padding: 4px 0 3px; border: 1px solid transparent; background: transparent; font-size: 11px; line-height: 1.1; display: flex; flex-direction: column; align-items: center; gap: 1px; color: #34495e; }
+#rail button i { font-style: normal; font-size: 17px; line-height: 20px; }
+#rail button:hover { background: #e9eef5; border-color: #d0d8e4; }
+#rail button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+#rail hr { width: 34px; border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+
+/* 下拉選單 */
+.dd { position: relative; display: inline-block; }
+.ddmenu { display: none; position: absolute; left: 0; top: 100%; z-index: 40; background: #fff; border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, .15); padding: 4px; min-width: 210px; }
+.dd.open .ddmenu { display: block; }
+.ddmenu button { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 10px; border-radius: 4px; white-space: nowrap; font-size: 13px; color: var(--text); }
+.ddmenu button:hover { background: var(--accent-weak); }
+.ddmenu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
+kbd { font-family: inherit; font-size: 11px; color: var(--muted); }
+#rail .dd.up .ddmenu { left: 100%; top: auto; bottom: 0; margin-left: 4px; }
+#rail .ddmenu button { flex-direction: row; font-size: 13px; width: 100%; padding: 6px 10px; }
+
+/* 作業步驟 */
+.steps { display: flex; list-style: none; margin: 0; padding: 8px 8px 6px; gap: 4px; background: #f6f8fa; border-bottom: 1px solid var(--line); }
+.steps li { flex: 1; text-align: center; font-size: 12px; padding: 4px 0; border-radius: 5px; cursor: pointer; color: #34495e; }
+.steps li b { display: block; width: 20px; height: 20px; line-height: 20px; margin: 0 auto 2px; border-radius: 50%; background: #d7dee8; color: #12355b; font-size: 12px; }
+.steps li:hover { background: #e9eef5; }
+.steps li.done b { background: #2e7d32; color: #fff; }
+.tabs { top: 0; }
+
+/* 右側 */
+details.rsec > summary { cursor: pointer; list-style: none; }
+details.rsec > summary::before { content: '▸ '; }
+details.rsec[open] > summary::before { content: '▾ '; }
+details.fold { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; padding: 0 8px; }
+details.fold > summary { cursor: pointer; padding: 6px 0; font-weight: 700; color: #12355b; }
+.ov-tedit { fill: none; stroke: #ff8c00; stroke-width: 2px; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }

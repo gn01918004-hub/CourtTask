@@ -13,7 +13,7 @@ fs.mkdirSync(OUT, { recursive: true });
   await pg.evaluate(() => { try { localStorage.clear(); } catch (e) {} window.print = () => {}; window.confirm = () => true; });
   await pg.waitForTimeout(300);
   // 匯入 DXF（透過檔案選擇）
-  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('[data-cmd=import]')]);
+  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnImport')]);
   await fc.setFiles([path.join(__dirname, '..', 'samples', '486.dxf')]);
   await pg.waitForTimeout(800);
   // 填案件資料

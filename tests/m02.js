@@ -12,7 +12,7 @@ if (!DIR || !fs.existsSync(DIR)) { console.log('請指定 .m02 範例資料夾')
     pg.on('dialog', d => d.accept());
     await pg.goto('file://' + path.join(__dirname, '..', 'app', 'index.html'));
     await pg.evaluate(() => { window.print = () => {}; });
-    const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('[data-cmd=open]')]);
+    const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnOpen')]);
     await fc.setFiles(path.join(DIR, f));
     await pg.waitForFunction(() => /已開啟舊檔/.test(document.getElementById('toast').textContent), null, { timeout: 15000 });
     const r = await pg.evaluate(() => ({ els: App.P.elements.length, maps: App.P.elements.filter(e => e.type === 'map').length, tables: App.P.elements.filter(e => e.type === 'table').length, lines: App.cad ? App.cad.lines.length : 0, svg: document.querySelectorAll('#content text').length }));

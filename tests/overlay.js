@@ -10,7 +10,7 @@ const OUT = process.argv[2];
   const check = (n, c) => { console.log((c ? 'PASS ' : 'FAIL ') + n); if (!c) errs.push(n); };
   await pg.goto('file://' + path.join(__dirname, '..', 'app', 'index.html'));
   await pg.evaluate(() => { window.print = () => {}; });
-  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('[data-cmd=import]')]);
+  const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnImport')]);
   await fc.setFiles(path.join(__dirname, '..', 'samples', '635', '1130412.dxf'));
   await pg.waitForFunction(() => App.cad && App.cad.lines.length > 7000, null, { timeout: 20000 });
   await pg.waitForTimeout(300);

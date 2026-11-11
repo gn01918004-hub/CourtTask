@@ -9,64 +9,64 @@
 </head>
 <body>
 <div id="app">
+  <!-- 頂端：檔案、方案、圖層、檢視、輸出（只放常用的） -->
   <header id="toolbar">
     <div class="brand">法院略圖繪製系統</div>
     <div class="grp">
-      <button data-cmd="new" title="新案件">新案件</button>
-      <button data-cmd="open" title="開啟專案 (Ctrl+O)：本系統 .ctp，或舊系統 SVMAP 的 .m02">開啟</button>
+      <div class="dd">
+        <button class="ddbtn" title="新案件、開啟、儲存">檔案 ▾</button>
+        <div class="ddmenu">
+          <button data-cmd="new">新案件…</button>
+          <button data-cmd="open">開啟（.ctp 專案／舊系統 .m02）<kbd>Ctrl+O</kbd></button>
+          <button data-cmd="save">儲存<kbd>Ctrl+S</kbd></button>
+          <button data-cmd="saveas">另存新檔<kbd>Ctrl+Shift+S</kbd></button>
+          <hr>
+          <button data-cmd="import">匯入 DXF…</button>
+        </div>
+      </div>
+      <button id="btnOpen" data-cmd="open" title="開啟 .ctp 專案或舊系統 .m02 (Ctrl+O)">開啟</button>
       <button data-cmd="save" title="儲存 (Ctrl+S)">儲存</button>
-      <button data-cmd="saveas" title="另存新檔 (Ctrl+Shift+S)">另存</button>
-    </div>
-    <div class="grp">
-      <button data-cmd="import" class="primary" title="匯入整段地籍 DXF 與案件 DXF">匯入 DXF</button>
+      <button id="btnImport" data-cmd="import" class="primary" title="匯入內網輸出的 DXF（整段地籍圖、現況圖、分割圖）">匯入 DXF</button>
     </div>
     <div class="grp plan">
-      <span class="lbl">方案</span><select id="planSel" title="同一案件的不同方案（現況、分割方案1、2…），各自有圖資、地上物與版面"></select>
-      <button data-cmd="planAdd" title="複製目前方案為新方案">＋</button>
-      <button data-cmd="planRen" title="方案改名">改名</button>
-      <button data-cmd="planDel" title="刪除目前方案">✕</button>
+      <span class="lbl">方案</span><select id="planSel" title="同一案件的不同方案（現況、分割方案1、2…），各自有圖資、說明與版面"></select>
+      <div class="dd">
+        <button class="ddbtn" title="方案管理">⋯</button>
+        <div class="ddmenu">
+          <button data-cmd="planAdd">複製目前方案為新方案</button>
+          <button data-cmd="planRen">方案改名</button>
+          <button data-cmd="planDel">刪除目前方案</button>
+        </div>
+      </div>
     </div>
     <div class="grp" id="ovBadge" title="目前編輯的圖層：現況與分割互不影響，疊在一起展示"></div>
-    <div class="grp tools">
-      <button data-tool="select" title="選取 (V)">↖ 選取</button>
-      <button data-tool="pan" title="移動圖面／裁切位置 (H)">✥ 移動圖面</button>
-      <button data-tool="face" title="點選成面 (F)">▣ 點選成面</button>
-      <button data-tool="poly" title="手繪多邊形 (P)">⬠ 多邊形</button>
-      <button data-tool="line" title="畫現況線 (L)">╱ 畫線</button>
-      <button data-tool="sline" title="畫分割線 (S)">┃ 分割線</button>
-      <button data-tool="break" title="斷線 (B)：把一條線切成兩段">✂ 斷線</button>
-      <button data-tool="lsel" title="框選線段 (Q)：一次選取多條現況/分割線">⬚ 框選線段</button>
-      <button data-tool="assign" title="點選改歸屬 (A)：點線段改成目前編輯的圖層（現況/分割）">⇄ 改歸屬</button>
-      <button data-tool="text" title="文字 (T)">T 文字</button>
-    </div>
-    <div class="grp">
-      <span class="lbl">新增</span>
-      <button data-cmd="add-map" title="新增略圖框（可多張，各自比例尺與裁切大小）">略圖框</button>
-      <button data-cmd="add-text">文字</button>
-      <button data-cmd="add-table">表格</button>
-      <button data-cmd="add-ftable">地上物表</button>
-      <button data-cmd="add-north">指北</button>
-      <button data-cmd="add-rect">框</button>
-      <button data-cmd="add-line">線</button>
-    </div>
     <div class="grp">
       <button data-cmd="undo" title="復原 (Ctrl+Z)">↶</button>
       <button data-cmd="redo" title="重做 (Ctrl+Y)">↷</button>
-      <button data-cmd="zout">−</button><span id="zoomLbl" class="lbl">100%</span><button data-cmd="zin">＋</button>
+    </div>
+    <div class="grp">
+      <button data-cmd="zout" title="縮小">−</button><span id="zoomLbl" class="lbl">100%</span><button data-cmd="zin" title="放大">＋</button>
       <button data-cmd="fit" title="整頁 (0)">整頁</button>
-      <button data-cmd="z100" title="實際大小">1:1</button>
     </div>
     <div class="grp right">
-      <button data-cmd="printA3" class="primary">列印 A3</button>
-      <button data-cmd="print8k">8K 套印</button>
-      <button data-cmd="help">說明</button>
+      <button data-cmd="printA3" class="primary" title="列印 A3 成果圖（1:1）">列印 A3</button>
+      <button data-cmd="print8k" title="8K 圖紙框選套印">8K 套印</button>
+      <button data-cmd="help" title="使用說明">？</button>
     </div>
   </header>
 
   <aside id="left">
+    <!-- 作業步驟：點一下就到該步驟需要的地方 -->
+    <ol class="steps">
+      <li data-step="import"><b>1</b>匯入</li>
+      <li data-step="crop"><b>2</b>裁切</li>
+      <li data-step="feat"><b>3</b>說明</li>
+      <li data-step="case"><b>4</b>資料</li>
+      <li data-step="out"><b>5</b>輸出</li>
+    </ol>
     <nav class="tabs">
       <button data-tab="case">案件資料</button>
-      <button data-tab="feat">地上物</button>
+      <button data-tab="feat">說明</button>
       <button data-tab="layer">圖層</button>
       <button data-tab="out">輸出</button>
     </nav>
@@ -78,19 +78,49 @@
     </div>
   </aside>
 
+  <!-- 畫布左側的直列工具列 -->
+  <nav id="rail">
+    <button data-tool="select" title="選取／移動 (V)"><i>↖</i>選取</button>
+    <button data-tool="pan" title="移動圖面：拖曳略圖框內改變裁切位置 (H)"><i>✥</i>移圖</button>
+    <hr>
+    <button data-tool="face" title="點選成面：點一下自動找出封閉範圍並算面積 (F)"><i>▣</i>成面</button>
+    <button data-tool="poly" title="手繪多邊形 (P)"><i>⬠</i>多邊</button>
+    <hr>
+    <button data-tool="line" title="畫現況線 (L)"><i>╱</i>畫線</button>
+    <button data-tool="sline" title="畫分割線 (S)"><i>┃</i>分割</button>
+    <button data-tool="break" title="斷線：把一條線切成兩段 (B)"><i>✂</i>斷線</button>
+    <button data-tool="assign" title="改歸屬：點線段改成目前編輯的圖層（現況/分割）(A)"><i>⇄</i>歸屬</button>
+    <button data-tool="lsel" title="框選線段 (Q)"><i>⬚</i>框選</button>
+    <hr>
+    <button data-tool="text" title="文字：略圖內＝註記，略圖外＝版面文字 (T)"><i>T</i>文字</button>
+    <div class="dd up">
+      <button class="ddbtn" title="新增版面元件"><i>＋</i>新增</button>
+      <div class="ddmenu">
+        <button data-cmd="add-map">略圖框（可多張，比例尺各自設定）</button>
+        <button data-cmd="add-ftable">說明表</button>
+        <button data-cmd="add-text">文字</button>
+        <button data-cmd="add-table">表格</button>
+        <button data-cmd="add-north">指北針</button>
+        <button data-cmd="add-rect">框</button>
+        <button data-cmd="add-line">線</button>
+      </div>
+    </div>
+  </nav>
+
   <main id="stage">
     <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
-    <div id="toolTip"></div>
   </main>
 
   <aside id="right">
     <div class="rhead">屬性</div>
     <div id="props"></div>
-    <div class="rhead">版面元件</div>
-    <div id="elList"></div>
+    <details class="rsec" id="elSec">
+      <summary class="rhead">版面元件清單</summary>
+      <div id="elList"></div>
+    </details>
   </aside>
 
-  <footer id="status"><span id="coord"></span><span id="saveState"></span></footer>
+  <footer id="status"><span id="toolTip"></span><span id="coord"></span><span id="saveState"></span></footer>
 </div>
 
 <div id="printArea"></div>
@@ -106,16 +136,19 @@
 <dialog id="dlgHelp">
   <h3>作業流程</h3>
   <ol>
-    <li><b>匯入 DXF</b>：選取內網套疊產出的整段地籍圖（如 486.dxf，含 LIN 地籍線、PAR 地號、REF_LINE0 案件線）。可一次多選（例如另加案件 KC1117.dxf）。到「圖層」頁確認各圖層用途。</li>
-    <li><b>裁切</b>：略圖框會自動置中於本案地號。用「移動圖面(H)」拖曳框內調整位置；選取略圖框後在右側設定比例尺與裁切大小（cm），或直接拖拉框的控制點。不必再手動裁切 DXF；需要時可「匯出裁切 DXF」。</li>
-    <li><b>地上物</b>：用「點選成面(F)」在每個區塊內點一下，自動成面並計算面積、編號 A、B、C…；在「地上物」頁填寫使用地號、備註。說明表自動產生。</li>
-    <li><b>案件資料</b>：填寫左側欄位（土地坐落、囑託法院及文號、囑託事項、收件、鑑測日期…），版面自動帶入。</li>
-    <li><b>版面</b>：所有元件都可拖曳、縮放；表格可拖拉格線調整欄寬列高、插入/刪除列欄、合併儲存格。可新增多個略圖框。</li>
-    <li><b>線型與斷線</b>：選取線段可以改成虛線、點線、鏈線等；用「斷線(B)」把一條線切成兩段，分別設定（例如非本案部分用虛線）。</li>
-    <li><b>方案</b>：同一案件有多個分割方案時，用工具列「方案 ＋」複製出新方案，各自匯入 DXF 並修改。</li>
-    <li><b>輸出</b>：列印 A3（1:1）；在「輸出」頁框選範圍後「8K 套印」，會自動放在 8K 紙左下角平移 X20、Y20 處。</li>
-    <li><b>核定後</b>：填入核定日期 → 再印 A3 份數。</li>
+    <li><b>匯入</b>：「匯入 DXF」選內網套疊輸出的 DXF（整段地籍圖、現況圖、分割圖，可多選）；舊系統的 .m02 用「檔案 → 開啟」。到「圖層」頁確認各圖層用途。</li>
+    <li><b>裁切</b>：略圖框自動置中於本案地號。左側工具「移圖」拖曳框內調整位置；選取略圖框後在右側設定比例尺、裁切大小（cm）、文字大小。</li>
+    <li><b>說明</b>：工具「成面」在每個區塊內點一下，自動找出範圍、計算面積、編號；在「說明」頁填使用地號、備註或所有權人，說明表自動產生。現況與分割用頂端「編輯」切換。</li>
+    <li><b>資料</b>：在「案件資料」頁填寫土地坐落、囑託法院及文號、囑託事項、收件、鑑測日期，版面自動帶入。</li>
+    <li><b>輸出</b>：「列印 A3」1:1 列印；「8K 套印」先在「輸出」頁框選範圍。核定後填入核定日期再印。</li>
   </ol>
+  <p><b>操作小技巧</b></p>
+  <ul class="small">
+    <li>元件單擊選取、拖曳移動；拖拉控制點縮放，會自動對齊其他元件邊緣（Alt 取消對齊）。</li>
+    <li>表格：<b>雙擊</b>進入表格編輯，才可拖拉格線、點格子、Shift 多選合併；Esc 結束。</li>
+    <li>線段：選取後可改線型（實線、虛線、鏈線…）、顏色；「斷線」把一條線切成兩段分別設定；按 1／2 快速設為現況／分割。</li>
+    <li>滑鼠滾輪縮放；按住空白鍵或滑鼠中鍵拖曳平移。Ctrl+Z 復原、Ctrl+S 儲存、Delete 刪除、方向鍵微調。</li>
+  </ul>
   <p class="small">本系統為單機網頁，不需網路與安裝。資料只存在本機：專案檔 (.ctp) 請自行存放；瀏覽器另有自動暫存。</p>
   <div class="btnrow"><button onclick="this.closest('dialog').close()">關閉</button></div>
 </dialog>

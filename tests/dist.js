@@ -15,7 +15,7 @@ const dir = fs.readdirSync(DIST).filter(d => /^CourtTask_v/.test(d) && fs.statSy
     pg.on('dialog', d => d.accept());
     await pg.goto('file://' + page);
     await pg.evaluate(() => { window.print = () => { window.__p = document.getElementById('printArea').innerHTML.length; }; });
-    const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('[data-cmd=import]')]);
+    const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnImport')]);
     await fc.setFiles(path.join(__dirname, '..', 'samples', '486.dxf'));
     await pg.waitForFunction(() => App.cad && App.cad.lines.length > 6000);
     const r = await pg.evaluate(() => {
@@ -26,7 +26,7 @@ const dir = fs.readdirSync(DIST).filter(d => /^CourtTask_v/.test(d) && fs.statSy
       App.api.addFaceAt(m, Geom.labelPoint(f));
       return { area: Render.featureArea(App.P.features[0], 2), ver: (document.querySelector('meta[name=version]') || {}).content };
     });
-    await pg.click('[data-cmd=printA3]'); await pg.waitForTimeout(200);
+    await pg.click('#toolbar [data-cmd=printA3]'); await pg.waitForTimeout(200);
     const printed = await pg.evaluate(() => window.__p || 0);
     const ok = !errs.length && !net.length && r.area === '212.02' && printed > 1000 && r.ver;
     console.log((ok ? 'PASS ' : 'FAIL ') + path.relative(DIST, page), JSON.stringify({ area: r.area, version: r.ver, printed, network: net, errors: errs }));

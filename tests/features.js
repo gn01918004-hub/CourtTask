@@ -14,7 +14,7 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
   await pg.evaluate(() => { window.print = () => {}; });
   pg.on('dialog', d => d.type() === 'prompt' ? d.accept(promptAns) : d.type() === 'confirm' ? (confirmAns ? d.accept() : d.dismiss()) : d.accept());
   const importFiles = async (files) => {
-    const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('[data-cmd=import]')]);
+    const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnImport')]);
     await fc.setFiles(files); await pg.waitForFunction(() => document.getElementById('toast').textContent.indexOf('已匯入') >= 0, null, { timeout: 15000 }); await pg.evaluate(() => { document.getElementById('toast').textContent = ''; });
   };
   const toScreen = (x, y) => pg.evaluate(([x, y]) => { const r = document.getElementById('svg').getBoundingClientRect(); return [r.left + (x - App.view.ox) * App.view.z, r.top + (y - App.view.oy) * App.view.z]; }, [x, y]);
@@ -40,7 +40,7 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
   const dashed = await pg.evaluate(() => document.querySelectorAll('#content line[stroke-dasharray]').length);
   check('one piece dash-dot rendered (' + dashed + ')', dashed >= 1);
   // 方案：複製成方案2，在方案2 匯入 641 的 DXF
-  await pg.click('[data-cmd=planAdd]'); await pg.waitForTimeout(300);
+  await pg.click('.plan .ddbtn'); await pg.click('[data-cmd=planAdd]'); await pg.waitForTimeout(300);
   check('plan2 created', await pg.evaluate(() => App.P.plans.length === 2 && App.P.planIdx === 1));
   await importFiles([SM('641/plan3_1140822.dxf')]);
   const r641 = await pg.evaluate(() => ({ lines: App.cad.lines.length, l0: App.cad.lines.filter(l => l.layer === '0').length, split: App.cad.lines.filter(l => l.layer === 'SPLIT').length, role: Render.roleOf(App.P, 'SPLIT', 'line') }));
@@ -59,6 +59,16 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
   await pg.click('[data-act=preset2]');
   const cols = await pg.evaluate(() => App.P.elements.find(e => e.type === 'ftable').columns.map(c => c.key).join(','));
   check('ftable preset 2 columns: ' + cols, cols === 'code,area');
+  // 說明表列高自動配合文字
+  const rh = await pg.evaluate(() => {
+    const ft = App.P.elements.find(e => e.type === 'ftable'), m = App.P.elements.find(e => e.type === 'map');
+    App.P.features = [{ id: 'x1', ov: 'case', code: 'A', pts: [[0, 0], [10, 0], [10, 10], [0, 10]], landNo: '486', note: '這是一段很長的備註文字需要換行顯示' }];
+    ft.columns = [{ key: 'code', header: '編號' }, { key: 'area', header: '面積' }, { key: 'note', header: '備註' }]; ft.cols = [15, 20, 20]; ft.ov = '';
+    const dr = () => { const tm = Render.tableModel(ft, App.P); return tm.rows[tm.kinds.indexOf('x1')]; };
+    const h0 = dr(); ft.autoRowH = true;
+    const h1 = dr(); App.P.features = []; return [h0, h1];
+  });
+  check('說明表列高自動 ' + rh.join(' → '), rh[1] > rh[0]);
   // 甲乙丙
   await pg.evaluate(() => { App.P.settings.codeScheme = 'stem'; });
   const codes = await pg.evaluate(() => [0, 1, 9, 10].map(i => Model.codeAt(i, 'stem')).join(''));
