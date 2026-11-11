@@ -64,6 +64,19 @@ const OUT = process.argv[2];
   await pg.evaluate(() => { const ft = App.P.elements.find(e => e.type === 'ftable'); ft.ov = 'split'; App.api.render(); });
   const rows = await pg.evaluate(() => { const ft = App.P.elements.find(e => e.type === 'ftable'); return Render.tableModel(ft, App.P).kinds.filter(k => !['title', 'header', 'notes'].includes(k)).length; });
   check('說明表只列分割層 (' + rows + ' 筆)', rows === 2);
+  // 同時有現況與分割 → 現況預設藍色
+  const col = await pg.evaluate(() => { Render.updateBoth(App.P, App.cad); return Render.lineStyle(App.P, 'case', null).color; });
+  check('兩層並存時現況為藍色 (' + col + ')', col === '#0050ff');
+  // 改歸屬工具：在分割圖層下點一條現況線 → 變分割；再點一次 → 還原
+  await pg.evaluate(() => { App.P.segStyle = {}; App.api.selectFn(null); App.api.render(); });
+  await pg.click('#ovBadge [data-setov=split]');
+  await pg.keyboard.press('a');
+  const ln = await pg.evaluate(() => { const i = App.cad.lines.findIndex(l => l.layer === 'REF_LINE0' && Math.hypot(l.x2 - l.x1, l.y2 - l.y1) > 8 && Math.abs(l.x1 - 213670) < 40 && Math.abs(l.y1 - 2704360) < 40); const l = App.cad.lines[i]; return { i, m: [(l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2] }; });
+  let q = await toS(ln.m[0], ln.m[1]); await pg.mouse.click(q[0], q[1]);
+  const r1 = await pg.evaluate((i) => (App.P.segStyle[String(i)] || {}).role, ln.i);
+  await pg.mouse.click(q[0], q[1]);
+  const r2 = await pg.evaluate((i) => (App.P.segStyle[String(i)] || {}).role, ln.i);
+  check('改歸屬：點一下→分割(' + r1 + ')，再點→還原(' + r2 + ')', r1 === 'split' && r2 === undefined);
   if (OUT) { await pg.evaluate(() => { App.api.selectFn(null); App.api.render(); }); await pg.waitForTimeout(300); await pg.screenshot({ path: path.join(OUT, 'overlay635.png') }); }
   console.log('errors:', errs.length ? errs : 'none');
   await b.close(); if (errs.length) process.exit(1);

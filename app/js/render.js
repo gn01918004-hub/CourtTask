@@ -32,7 +32,24 @@
     return 'other';
   }
   var ROLE_STYLE = { parcel: 'parcelLine', case: 'caseLine', split: 'splitLine', other: 'otherLine' };
-  function roleStyle(P, role) { return P.styles[ROLE_STYLE[role] || 'otherLine'] || P.styles.otherLine; }
+  var bothFlag = new WeakMap();   // 該專案目前是否同時有現況與分割
+  function roleStyle(P, role) {
+    var st = P.styles[ROLE_STYLE[role] || 'otherLine'] || P.styles.otherLine;
+    if (role === 'case' && st.colorBoth && bothFlag.get(P)) return Object.assign({}, st, { color: st.colorBoth });
+    return st;
+  }
+  function updateBoth(P, cad) {
+    var c = false, s = false;
+    if (cad) {
+      var memo = {};
+      cad.lines.forEach(function (l) { var k = l.layer + '|' + l.color; if (!(k in memo)) memo[k] = roleOf(P, l.layer, 'line', l.color); if (memo[k] === 'case') c = true; if (memo[k] === 'split') s = true; });
+    }
+    Object.keys(P.segStyle || {}).forEach(function (k) { var r = P.segStyle[k] && P.segStyle[k].role; if (r === 'case') c = true; if (r === 'split') s = true; });
+    (P.userLines || []).forEach(function (l) { if ((l.role || 'case') === 'case') c = true; if (l.role === 'split') s = true; });
+    (P.features || []).forEach(function (f) { if ((f.ov || 'case') === 'case') c = true; else if (f.ov === 'split') s = true; });
+    bothFlag.set(P, c && s);
+    return c && s;
+  }
 
   /* ---------- 線型 ---------- */
   var DASHES = {
@@ -622,6 +639,7 @@
   }
 
   function renderSheet(P, cad, opts) {
+    updateBoth(P, cad);
     opts = opts || {};
     var s = '';
     P.elements.forEach(function (el) { s += renderElement(el, P, cad, opts); });
@@ -642,6 +660,6 @@
     esc: esc, renderSheet: renderSheet, renderElement: renderElement, renderGhost: renderGhost, mapView: mapView,
     tableModel: tableModel, cellRect: cellRect, bounds: bounds, roleOf: roleOf, defaultRole: defaultRole,
     featureArea: featureArea, fieldsOf: fieldsOf, pieces: pieces, eachPiece: eachPiece, lineStyle: lineStyle, roleStyle: roleStyle,
-    DASH_LIST: DASH_LIST, mergeInfo: mergeInfo, detectMerge: detectMerge, parseParcels: parseParcels, featOv: featOv, visFeatures: visFeatures, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
+    DASH_LIST: DASH_LIST, updateBoth: updateBoth, mergeInfo: mergeInfo, detectMerge: detectMerge, parseParcels: parseParcels, featOv: featOv, visFeatures: visFeatures, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
   };
 })(typeof window !== 'undefined' ? window : globalThis);

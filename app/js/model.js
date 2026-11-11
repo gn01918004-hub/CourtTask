@@ -92,7 +92,7 @@
   function defaultStyles() {
     return {
       parcelLine: { color: '#000000', width: 0.15, dash: 'solid' },
-      caseLine: { color: '#ff0000', width: 0.2, dash: 'solid' },
+      caseLine: { color: '#ff0000', width: 0.2, dash: 'solid', colorBoth: '#0050ff' },  // colorBoth：同時有分割時的現況顏色
       splitLine: { color: '#ff0000', width: 0.3, dash: 'solid' },
       otherLine: { color: '#000000', width: 0.15, dash: 'solid' },
       parcelText: { color: '#000000', size: 6.2 },

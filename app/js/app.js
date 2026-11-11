@@ -552,6 +552,10 @@
       m = mapAt(p); if (!m) return toast('請在略圖框內點選');
       addFaceAt(m, R.mapView(m).toW(p[0], p[1]), ev.shiftKey); return;
     }
+    if (tool === 'assign') {
+      m = mapAt(p); if (!m) return toast('請在略圖框內點選線段');
+      assignAt(m, p, ev.shiftKey, ev.altKey); return;
+    }
     if (tool === 'break') {
       m = mapAt(p); if (!m) return toast('請在略圖框內點選線段');
       breakAt(m, p); return;
@@ -933,6 +937,28 @@
     select({ kind: 'seg', idx: out, mapId: m.id });
     toast('框選 ' + out.length + ' 段，可在右側改「歸屬」或線型');
   }
+  /* 點選改歸屬：點一下＝指定為目前編輯的圖層，再點一次＝還原圖層設定；Shift＝整串相連線段 */
+  function assignAt(m, p, chain, anyLine) {
+    var P = App.P, v = R.mapView(m), w = v.toW(p[0], p[1]), bd = tol() / v.k, best = null, ov = P.activeOv || 'case';
+    R.eachPiece(P, App.cad, function (pc, role) {
+      if (role === 'parcel' && !anyLine) return;
+      var d = G.distToSeg(w, [pc.x1, pc.y1], [pc.x2, pc.y2]);
+      if (d < bd) { bd = d; best = { pc: pc, role: role }; }
+    });
+    var ul = null;
+    P.userLines.forEach(function (l, i) { var d = G.distToSeg(w, [l.x1, l.y1], [l.x2, l.y2]); if (d < bd) { bd = d; ul = i; best = null; } });
+    if (ul != null) { var L = P.userLines[ul]; L.role = (L.role || 'case') === ov ? (ov === 'case' ? 'split' : 'case') : ov; changed(); render(); return; }
+    if (!best) return toast('請點在線段上（地籍線請按住 Alt）');
+    var keys = chain ? connectedPieces([best.pc.key]) : [best.pc.key];
+    var undoTo = best.role === ov;  // 已經是目前圖層 → 還原
+    keys.forEach(function (k) {
+      var o = P.segStyle[k] = P.segStyle[k] || {};
+      if (undoTo) delete o.role; else o.role = ov;
+      if (!Object.keys(o).length) delete P.segStyle[k];
+    });
+    changed(); render();
+    toast((undoTo ? '已還原 ' : '已指定為「' + P.ovs[ov].name + '」：') + keys.length + ' 段', 1200);
+  }
   function unsplit(keys) {
     var P = App.P, done = {};
     keys.forEach(function (k) {
@@ -1170,6 +1196,7 @@
       h += '</div>';
       h += '<div class="btnrow"><span class="small">快速：</span>' + [['#ff0000', '紅'], ['#0050ff', '藍'], ['#000000', '黑']].map(function (c) { return '<button data-qc="' + c[0] + '" style="color:' + c[0] + '">' + c[1] + '</button>'; }).join('') +
         '<button data-qd="solid">實線</button><button data-qd="dash">虛線</button></div>';
+      if (!isU) h += '<div class="btnrow"><span class="small">歸屬：</span><button data-qr="case">→ 現況 (1)</button><button data-qr="split">→ 分割 (2)</button><button data-qr="">依圖層</button></div>';
       h += '<div class="btnrow">' + btn('del', isU ? '刪除' : '隱藏此段', 'danger') + (!isU ? btn('clr', '恢復圖層樣式') : '') + (anySplit ? btn('unsplit', '取消斷線') : '') + (!isU ? btn('conn', '選取相連線段') : '') + '</div>';
       h += '<p class="small">要讓同一條線一半實線、一半虛線：用工具列「斷線(B)」在線上點一下切成兩段，再分別設定。</p>';
       box.innerHTML = h;
@@ -1181,6 +1208,11 @@
         else s.idx.forEach(function (key) { var o = P.segStyle[key] = P.segStyle[key] || {}; if (v == null) delete o[k]; else o[k] = v; });
       });
       box.onclick = function (ev) {
+        var qr = ev.target.closest('[data-qr]');
+        if (qr) {
+          s.idx.forEach(function (key) { var o = P.segStyle[key] = P.segStyle[key] || {}; if (qr.dataset.qr) o.role = qr.dataset.qr; else delete o.role; });
+          render(); changed(); renderProps(); return;
+        }
         var q = ev.target.closest('[data-qc],[data-qd]');
         if (q) {
           var k = q.dataset.qc ? 'color' : 'dash', v = q.dataset.qc || q.dataset.qd;
@@ -1538,6 +1570,7 @@
       h += '<tr><td>' + r[1] + '</td><td>' + color(r[0] + '.color', S[r[0]].color) + '</td><td>' + inp(r[0] + '.width', S[r[0]].width, 'number', 'step="0.01"') + '</td><td>' + dashSel(r[0] + '.dash', S[r[0]].dash) + '</td></tr>';
     });
     h += '</tbody></table>';
+    h += '<div class="btnrow"><span class="small">同時有現況與分割時，現況改用</span>' + color('caseLine.colorBoth', S.caseLine.colorBoth || '#0050ff') + '<span class="small">（' + (R.updateBoth(P, App.cad) ? '目前套用中' : '目前只有單一圖層，未套用') + '）</span></div>';
     h += '<div class="sec">文字樣式</div><div class="grid2">' +
       field('地號字高', inp('parcelText.size', S.parcelText.size, 'number', 'step="0.1"')) + field('地號顏色', color('parcelText.color', S.parcelText.color)) +
       field('本案地號字高', inp('targetText.size', S.targetText.size, 'number', 'step="0.1"')) + field('本案地號顏色', color('targetText.color', S.targetText.color)) +
@@ -1738,6 +1771,7 @@
       line: '畫現況線：逐點點選，雙擊或 Enter 完成（畫好後可在右側改線型、顏色）',
       sline: '畫分割線：逐點點選（自動鎖點），雙擊或 Enter 完成；畫好後可用「點選成面」切出分割範圍', break: '斷線：在線段上點一下，把它切成兩段，之後可分別設定線型（例如一段實線、一段虛線）', text: '文字：在略圖內點選＝圖面註記；在略圖外＝版面文字',
       region: '框選 8K 套印範圍：在版面上拖曳一個矩形',
+      assign: '點選改歸屬：點線段＝改成目前編輯的圖層（工具列「編輯」切換現況/分割），再點一次還原；Shift＋點＝整串相連線段；Alt＋點＝可選地籍線',
       lsel: '框選線段：在略圖內拖曳矩形，選取完全在框內的現況/分割線（不含地籍線），再到右側改歸屬或線型'
     };
     $('#toolTip').textContent = tips[t] || '';
@@ -1762,7 +1796,13 @@
     if (ev.key === 'Enter' && App.draw) { finishDraw(); return; }
     if (ev.key === 'Backspace' && App.draw) { App.draw.pts.pop(); if (!App.draw.pts.length) App.draw = null; render(); ev.preventDefault(); return; }
     if (ev.key === 'Delete' || ev.key === 'Backspace') { deleteSel(); ev.preventDefault(); return; }
-    var map = { v: 'select', h: 'pan', f: 'face', p: 'poly', l: 'line', s: 'sline', b: 'break', t: 'text', r: 'region', q: 'lsel' };
+    var map = { v: 'select', h: 'pan', f: 'face', p: 'poly', l: 'line', s: 'sline', b: 'break', t: 'text', r: 'region', q: 'lsel', a: 'assign' };
+    // 選取線段時：1＝現況、2＝分割
+    if (App.sel && App.sel.kind === 'seg' && (ev.key === '1' || ev.key === '2')) {
+      var rr = ev.key === '1' ? 'case' : 'split';
+      App.sel.idx.forEach(function (k) { (App.P.segStyle[k] = App.P.segStyle[k] || {}).role = rr; });
+      changed(); render(); renderProps(); toast('已設為' + App.P.ovs[rr].name); return;
+    }
     if (!ctrl && map[ev.key.toLowerCase()]) { setTool(map[ev.key.toLowerCase()]); return; }
     if (ev.key === '0' && !ctrl) { fitView(); return; }
     if (ev.key.indexOf('Arrow') === 0 && App.sel) {

@@ -76,7 +76,7 @@ table.flist td:first-child input { width: 38px; }
 
 #stage { grid-area: stage; position: relative; overflow: hidden; background: #c9d0d9; }
 #stage.grab, #stage.grab svg { cursor: grab !important; }
-#stage[data-tool=face] svg, #stage[data-tool=poly] svg, #stage[data-tool=lsel] svg, #stage[data-tool=line] svg, #stage[data-tool=sline] svg, #stage[data-tool=break] svg, #stage[data-tool=region] svg { cursor: crosshair; }
+#stage[data-tool=face] svg, #stage[data-tool=poly] svg, #stage[data-tool=lsel] svg, #stage[data-tool=assign] svg, #stage[data-tool=line] svg, #stage[data-tool=sline] svg, #stage[data-tool=break] svg, #stage[data-tool=region] svg { cursor: crosshair; }
 #stage[data-tool=pan] svg { cursor: move; }
 #stage[data-tool=text] svg { cursor: text; }
 #svg { width: 100%; height: 100%; display: block; user-select: none; touch-action: none; }
