@@ -8,9 +8,18 @@
 
 ## 部署到內網
 
-1. 把整個 `app` 資料夾（含 `css/`、`js/`）複製到內網電腦或共用磁碟，例如 `D:\CourtTask\app`。
-2. 用 Chrome 開啟 `D:\CourtTask\app\index.html`（可以建立桌面捷徑）。
-3. 字型：會使用 Windows 內建的「標楷體 (DFKai-SB)」與 Arial。
+散發檔是 `dist/CourtTask_v<版本>.zip`，解壓縮後有兩種用法，功能完全相同，擇一即可：
+
+- **單一檔案版**：`CourtTask.html`。把這一個檔案複製到內網電腦，例如 `D:\CourtTask\CourtTask.html`，用 Chrome 開啟就能使用。最容易搬移。
+- **多檔版**：`app\index.html`，需要整個 `app` 資料夾一起複製。日後只更新個別檔案時比較方便。
+
+注意事項：
+- 不需要安裝、不需要網路、不需要伺服器，也不會連到任何外部網址。
+- 建議建立桌面捷徑。第一次開啟時，若 Chrome 詢問是否允許存取檔案，請允許。
+- 字型會使用 Windows 內建的「標楷體 (DFKai-SB)」和 Arial。
+- 資料只存在本機：專案檔 (.ctp) 請自行存到固定資料夾或共用磁碟；瀏覽器另有自動暫存，但換電腦、清除瀏覽器資料就會消失。
+- 範本存在瀏覽器裡，換電腦時請用「輸出 → 匯出範本檔」帶過去。
+- 打包方式（開發用）：`python3 tools/build.py 1.0`，驗證方式：`node tests/dist.js`。
 
 ## 作業流程
 
