@@ -167,3 +167,19 @@ details.rsec[open] > summary::before { content: '▾ '; }
 details.fold { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; padding: 0 8px; }
 details.fold > summary { cursor: pointer; padding: 6px 0; font-weight: 700; color: #12355b; }
 .ov-tedit { fill: none; stroke: #ff8c00; stroke-width: 2px; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; }
+
+/* 改歸屬工具條 */
+.floatbar { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0, 0, 0, .15); padding: 6px 10px; display: flex; gap: 6px; align-items: center; z-index: 20; white-space: nowrap; }
+.floatbar button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* 右鍵選單 */
+.ctx { position: fixed; z-index: 60; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); padding: 4px; min-width: 220px; font-size: 13px; }
+.ctx-title { padding: 4px 8px 6px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); margin-bottom: 3px; }
+.ctx-item { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 10px; border-radius: 4px; }
+.ctx-item:hover { background: var(--accent-weak); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-row { display: flex; align-items: center; gap: 3px; padding: 3px 8px; flex-wrap: wrap; }
+.ctx-row > span { width: 52px; color: var(--muted); font-size: 12px; }
+.ctx-row button { padding: 2px 7px; font-size: 12px; }
+.ctx-row button:hover { background: var(--accent-weak); }
+
+.floatbar[hidden], .ctx[hidden] { display: none; }

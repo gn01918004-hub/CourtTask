@@ -67,16 +67,35 @@ const OUT = process.argv[2];
   // 同時有現況與分割 → 現況預設藍色
   const col = await pg.evaluate(() => { Render.updateBoth(App.P, App.cad); return Render.lineStyle(App.P, 'case', null).color; });
   check('兩層並存時現況為藍色 (' + col + ')', col === '#0050ff');
-  // 改歸屬工具：在分割圖層下點一條現況線 → 變分割；再點一次 → 還原
+  // 改歸屬工具：上方先選「分割」，連點兩條不同的線都變分割；改選「現況」再點 → 現況
   await pg.evaluate(() => { App.P.segStyle = {}; App.api.selectFn(null); App.api.render(); });
-  await pg.click('#ovBadge [data-setov=split]');
   await pg.keyboard.press('a');
-  const ln = await pg.evaluate(() => { const i = App.cad.lines.findIndex(l => l.layer === 'REF_LINE0' && Math.hypot(l.x2 - l.x1, l.y2 - l.y1) > 8 && Math.abs(l.x1 - 213670) < 40 && Math.abs(l.y1 - 2704360) < 40); const l = App.cad.lines[i]; return { i, m: [(l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2] }; });
-  let q = await toS(ln.m[0], ln.m[1]); await pg.mouse.click(q[0], q[1]);
-  const r1 = await pg.evaluate((i) => (App.P.segStyle[String(i)] || {}).role, ln.i);
-  await pg.mouse.click(q[0], q[1]);
-  const r2 = await pg.evaluate((i) => (App.P.segStyle[String(i)] || {}).role, ln.i);
-  check('改歸屬：點一下→分割(' + r1 + ')，再點→還原(' + r2 + ')', r1 === 'split' && r2 === undefined);
+  check('改歸屬工具條出現', await pg.isVisible('#assignBar'));
+  await pg.click('#assignBar [data-assign=split]');
+  const lns = await pg.evaluate(() => {
+    const out = [];
+    App.cad.lines.forEach((l, i) => { if (out.length < 2 && l.layer === 'REF_LINE0' && Math.hypot(l.x2 - l.x1, l.y2 - l.y1) > 8 && Math.abs(l.x1 - 213670) < 40 && Math.abs(l.y1 - 2704360) < 40 && (!out.length || Math.hypot((l.x1 + l.x2) / 2 - out[0].m[0], (l.y1 + l.y2) / 2 - out[0].m[1]) > 6)) out.push({ i, m: [(l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2] }); });
+    return out;
+  });
+  for (const ln of lns) { const q = await toS(ln.m[0], ln.m[1]); await pg.mouse.click(q[0], q[1]); }
+  const rr = await pg.evaluate((ids) => ids.map(i => (App.P.segStyle[String(i)] || {}).role), lns.map(l => l.i));
+  check('連點兩條線都改成分割 ' + rr, rr.length === 2 && rr.every(r => r === 'split'));
+  await pg.click('#assignBar [data-assign=case]');
+  { const q = await toS(lns[0].m[0], lns[0].m[1]); await pg.mouse.click(q[0], q[1]); }
+  const r3 = await pg.evaluate((i) => (App.P.segStyle[String(i)] || {}).role, lns[0].i);
+  check('改選「現況」後點 → 現況 (' + r3 + ')', r3 === 'case');
+  // 右鍵選單：線段改線型、粗細
+  await pg.keyboard.press('v');
+  { const q = await toS(lns[1].m[0], lns[1].m[1]); await pg.mouse.click(q[0], q[1], { button: 'right' }); }
+  check('右鍵選單出現', await pg.isVisible('#ctx'));
+  await pg.click('#ctx .ctx-row:has-text("線型") button:has-text("虛線")');
+  { const q = await toS(lns[1].m[0], lns[1].m[1]); await pg.mouse.click(q[0], q[1], { button: 'right' }); }
+  await pg.click('#ctx .ctx-row:has-text("粗細") button:has-text("0.5")');
+  const st5 = await pg.evaluate((i) => App.P.segStyle[String(i)], lns[1].i);
+  check('右鍵改線型、粗細 ' + JSON.stringify(st5), st5 && st5.dash === 'dash' && st5.lw === 0.5);
+  // 框外全圖：選取略圖框時不顯示，移圖拖曳時才顯示
+  const ghost1 = await pg.evaluate(() => { const m = App.P.elements.find(e => e.type === 'map'); App.api.selectFn({ kind: 'el', id: m.id }); App.api.render(); return document.querySelectorAll('#svg .ghost').length; });
+  check('選取略圖框時不顯示框外全圖', ghost1 === 0);
   if (OUT) { await pg.evaluate(() => { App.api.selectFn(null); App.api.render(); }); await pg.waitForTimeout(300); await pg.screenshot({ path: path.join(OUT, 'overlay635.png') }); }
   console.log('errors:', errs.length ? errs : 'none');
   await b.close(); if (errs.length) process.exit(1);

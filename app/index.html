@@ -90,7 +90,6 @@
     <button data-tool="sline" title="畫分割線 (S)"><i>┃</i>分割</button>
     <button data-tool="break" title="斷線：把一條線切成兩段 (B)"><i>✂</i>斷線</button>
     <button data-tool="assign" title="改歸屬：點線段改成目前編輯的圖層（現況/分割）(A)"><i>⇄</i>歸屬</button>
-    <button data-tool="lsel" title="框選線段 (Q)"><i>⬚</i>框選</button>
     <hr>
     <button data-tool="text" title="文字：略圖內＝註記，略圖外＝版面文字 (T)"><i>T</i>文字</button>
     <div class="dd up">
@@ -109,6 +108,7 @@
 
   <main id="stage">
     <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="assignBar" class="floatbar" hidden></div>
   </main>
 
   <aside id="right">
@@ -123,6 +123,7 @@
   <footer id="status"><span id="toolTip"></span><span id="coord"></span><span id="saveState"></span></footer>
 </div>
 
+<div id="ctx" class="ctx" hidden></div>
 <div id="printArea"></div>
 <div id="toast"></div>
 
@@ -147,6 +148,7 @@
     <li>元件單擊選取、拖曳移動；拖拉控制點縮放，會自動對齊其他元件邊緣（Alt 取消對齊）。</li>
     <li>表格：<b>雙擊</b>進入表格編輯，才可拖拉格線、點格子、Shift 多選合併；Esc 結束。</li>
     <li>線段：選取後可改線型（實線、虛線、鏈線…）、顏色；「斷線」把一條線切成兩段分別設定；按 1／2 快速設為現況／分割。</li>
+    <li><b>右鍵</b>：線段可直接改成現況／分割、改線型、粗細、顏色、斷線；說明項目、地號文字、略圖框、表格也有常用功能。</li>
     <li>滑鼠滾輪縮放；按住空白鍵或滑鼠中鍵拖曳平移。Ctrl+Z 復原、Ctrl+S 儲存、Delete 刪除、方向鍵微調。</li>
   </ul>
   <p class="small">本系統為單機網頁，不需網路與安裝。資料只存在本機：專案檔 (.ctp) 請自行存放；瀏覽器另有自動暫存。</p>
