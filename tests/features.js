@@ -39,6 +39,16 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
   await pg.selectOption('#props [data-k=dash]', 'dashDot'); await pg.waitForTimeout(100);
   const dashed = await pg.evaluate(() => document.querySelectorAll('#content line[stroke-dasharray]').length);
   check('one piece dash-dot rendered (' + dashed + ')', dashed >= 1);
+  // 圖層鎖定：地籍線預設鎖定 → 斷線工具點地籍線無效；解除後才可斷
+  const lin = await pg.evaluate(() => { const i = App.cad.lines.findIndex(l => l.layer === 'LIN' && Math.hypot(l.x2 - l.x1, l.y2 - l.y1) > 20 && l.x1 > 221000 && l.x1 < 221070 && l.y1 > 2706840 && l.y1 < 2706920); const l = App.cad.lines[i]; return { i, mid: [(l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2] }; });
+  await pg.keyboard.press('b');
+  p = await w2s(lin.mid[0], lin.mid[1]); await pg.mouse.click(p[0], p[1]);
+  const lk1 = await pg.evaluate((i) => !!App.P.splits[i], lin.i);
+  await pg.click('#lockBar [data-lockq=parcel]');
+  await pg.mouse.click(p[0], p[1]);
+  const lk2 = await pg.evaluate((i) => !!App.P.splits[i], lin.i);
+  check('地籍線鎖定時點不到，解除後可斷線 (' + lk1 + ',' + lk2 + ')', lk1 === false && lk2 === true);
+  await pg.click('#lockBar [data-lockq=parcel]'); await pg.keyboard.press('Escape');
   // 方案：複製成方案2，在方案2 匯入 641 的 DXF
   await pg.click('.plan .ddbtn'); await pg.click('[data-cmd=planAdd]'); await pg.waitForTimeout(300);
   check('plan2 created', await pg.evaluate(() => App.P.plans.length === 2 && App.P.planIdx === 1));
@@ -50,7 +60,7 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
   if (OUT) await pg.screenshot({ path: path.join(OUT, 'f641.png') });
   await pg.selectOption('#planSel', '0'); await pg.waitForTimeout(200);
   const back = await pg.evaluate(() => ({ lines: App.cad.lines.length, feats: App.P.features.length, splits: Object.keys(App.P.splits).length }));
-  check('switch back to plan1 keeps its data ' + JSON.stringify(back), back.lines === 6810 && back.feats === 0 && back.splits === 1);
+  check('switch back to plan1 keeps its data ' + JSON.stringify(back), back.lines === 6810 && back.feats === 0 && back.splits === 2);
   // 存檔往返
   const rt = await pg.evaluate(() => { const d = JSON.parse(JSON.stringify(App.api.fileData())); App.api.loadData(d); return { plans: App.P.plans.length, cads: d.cads.length, c0: App.planCads[0].lines.length, c1: App.planCads[1].lines.length }; });
   check('roundtrip 2 plans ' + JSON.stringify(rt), rt.plans === 2 && rt.cads === 2 && rt.c1 > 9000);

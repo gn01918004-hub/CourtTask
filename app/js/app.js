@@ -436,6 +436,12 @@
     return hit;
   }
   /* 是否在略圖框的框線附近（拖框線＝移動略圖框，框內＝移圖） */
+  /* 圖層鎖定：鎖住的圖層不能被點選、斷線、改歸屬（仍可被鎖點） */
+  var LOCK_DEFAULT = { parcel: true, case: false, split: false, other: false };
+  function isLocked(role) {
+    var L = App.P.layerLock || LOCK_DEFAULT;
+    return L[role] != null ? !!L[role] : !!LOCK_DEFAULT[role];
+  }
   function nearFrame(m, p) {
     var t = Math.max(2.5, 9 / App.view.z);
     return p[0] - m.x < t || m.x + m.w - p[0] < t || p[1] - m.y < t || m.y + m.h - p[1] < t;
@@ -497,7 +503,7 @@
       if (best) return best;
       bd = tw;
       R.eachPiece(P, App.cad, function (pc, role) {
-        if (!anyLine && role !== 'case' && role !== 'split') return;
+        if (isLocked(role)) return;
         if (Math.max(pc.x1, pc.x2) < w[0] - bd || Math.min(pc.x1, pc.x2) > w[0] + bd || Math.max(pc.y1, pc.y2) < w[1] - bd || Math.min(pc.y1, pc.y2) > w[1] + bd) return;
         var d = G.distToSeg(w, [pc.x1, pc.y1], [pc.x2, pc.y2]);
         if (d < bd) { bd = d; best = { kind: 'seg', idx: [pc.key], mapId: m.id }; }
@@ -910,15 +916,17 @@
   /* 斷線：在點選位置把線段切成兩段，之後可分別設定線型或隱藏 */
   function breakAt(m, p) {
     var P = App.P, v = R.mapView(m), w = v.toW(p[0], p[1]), bd = tol() / v.k, best = null;
-    R.eachPiece(P, App.cad, function (pc) {
+    R.eachPiece(P, App.cad, function (pc, role) {
+      if (isLocked(role)) return;
       var d = G.distToSeg(w, [pc.x1, pc.y1], [pc.x2, pc.y2]);
       if (d < bd) { bd = d; best = { cad: pc }; }
     });
     P.userLines.forEach(function (l, i) {
+      if (isLocked(l.role || 'case')) return;
       var d = G.distToSeg(w, [l.x1, l.y1], [l.x2, l.y2]);
       if (d < bd) { bd = d; best = { user: i }; }
     });
-    if (!best) return toast('請點在線段上');
+    if (!best) return toast('請點在線段上（鎖定的圖層不能斷線）');
     var sp = snapWorld(m, p).w;
     function projT(l) {
       var dx = l.x2 - l.x1, dy = l.y2 - l.y1, l2 = dx * dx + dy * dy;
@@ -999,11 +1007,12 @@
   function nearestLine(m, p) {
     var P = App.P, v = R.mapView(m), w = v.toW(p[0], p[1]), bd = tol() / v.k * 1.3, best = null;
     R.eachPiece(P, App.cad, function (pc, role) {
+      if (isLocked(role)) return;
       if (Math.max(pc.x1, pc.x2) < w[0] - bd || Math.min(pc.x1, pc.x2) > w[0] + bd || Math.max(pc.y1, pc.y2) < w[1] - bd || Math.min(pc.y1, pc.y2) > w[1] + bd) return;
       var d = G.distToSeg(w, [pc.x1, pc.y1], [pc.x2, pc.y2]);
       if (d < bd) { bd = d; best = { key: pc.key, role: role }; }
     });
-    P.userLines.forEach(function (l, i) { var d = G.distToSeg(w, [l.x1, l.y1], [l.x2, l.y2]); if (d < bd) { bd = d; best = { ul: i, role: l.role || 'case' }; } });
+    P.userLines.forEach(function (l, i) { if (isLocked(l.role || 'case')) return; var d = G.distToSeg(w, [l.x1, l.y1], [l.x2, l.y2]); if (d < bd) { bd = d; best = { ul: i, role: l.role || 'case' }; } });
     return best;
   }
   function assignAt(m, p, chain) {
@@ -1017,13 +1026,29 @@
   }
   function assignWindow(m, r) {
     var v = R.mapView(m), a = v.toW(r.x, r.y + r.h), b = v.toW(r.x + r.w, r.y), keys = [], uls = [];
-    R.eachPiece(App.P, App.cad, function (pc) {
+    R.eachPiece(App.P, App.cad, function (pc, role) {
+      if (isLocked(role)) return;
       if (Math.min(pc.x1, pc.x2) >= a[0] && Math.max(pc.x1, pc.x2) <= b[0] && Math.min(pc.y1, pc.y2) >= a[1] && Math.max(pc.y1, pc.y2) <= b[1]) keys.push(pc.key);
     });
     App.P.userLines.forEach(function (l, i) { if (Math.min(l.x1, l.x2) >= a[0] && Math.max(l.x1, l.x2) <= b[0] && Math.min(l.y1, l.y2) >= a[1] && Math.max(l.y1, l.y2) <= b[1]) uls.push(i); });
     if (!keys.length && !uls.length) return toast('框內沒有完整的線段');
     setSegRole(keys, uls.reverse(), App.assignTo || 'split');
     changed(); render(); toast('框內 ' + (keys.length + uls.length) + ' 段 → ' + ROLE_NAMES[App.assignTo || 'split']);
+  }
+  function setLock(role, on) {
+    App.P.layerLock = Object.assign({}, LOCK_DEFAULT, App.P.layerLock || {});
+    App.P.layerLock[role] = on;
+    changed(); renderAssignBar(); updateLockBar();
+    if (App.tab === 'layer') renderLayerTab();
+    toast((on ? '已鎖定' : '已解除鎖定') + '：' + ROLE_NAMES[role], 1200);
+  }
+  /* 畫布右上角的圖層鎖定快速開關（改線時隨手鎖住不想動的圖層） */
+  function updateLockBar() {
+    var bar = $('#lockBar'); if (!bar) return;
+    bar.innerHTML = '<span class="small">鎖定</span>' + ['parcel', 'case', 'split', 'other'].map(function (r) {
+      var on = isLocked(r);
+      return '<button data-lockq="' + r + '" class="' + (on ? 'on' : '') + '" title="' + (on ? '已鎖定，點一下解除' : '點一下鎖定') + '">' + (on ? '🔒' : '🔓') + ROLE_NAMES[r] + '</button>';
+    }).join('');
   }
   function renderAssignBar() {
     var bar = $('#assignBar'); if (!bar) return;
@@ -1059,6 +1084,8 @@
       rows.push({ label: '粗細', chips: WIDTHS.map(function (w) { return [String(w), function () { apply('lw', w); }]; }) });
       rows.push({ label: '顏色', chips: COLORS.map(function (c) { return [c[1], function () { apply('color', c[0]); }, c[0]]; }) });
       rows.push({ item: '在這裡斷線', fn: function () { breakAt(m, p); } });
+      var hitRole = keys.length ? (P.segStyle[keys[0]] && P.segStyle[keys[0]].role) || R.roleOf(P, App.cad.lines[parseInt(keys[0], 10)].layer, 'line', App.cad.lines[parseInt(keys[0], 10)].color) : null;
+      if (hitRole && ROLE_NAMES[hitRole]) rows.push({ item: '鎖定「' + ROLE_NAMES[hitRole] + '」圖層（之後點不到）', fn: function () { setLock(hitRole, true); select(null); } });
       if (keys.length) rows.push({ item: '選取相連線段', fn: function () { select({ kind: 'seg', idx: connectedPieces(keys), mapId: m.id }); } });
       rows.push({ item: '恢復圖層預設樣式', fn: function () { keys.forEach(function (k) { var o = P.segStyle[k]; if (o) { delete o.dash; delete o.lw; delete o.color; delete o.role; } }); } });
       rows.push({ item: uls.length ? '刪除線段' : '隱藏線段', danger: true, fn: function () { deleteSel(); } });
@@ -1727,9 +1754,12 @@
       h += '<div class="btnrow">' + btn('mgDetect', '依圖上的 X 記號自動判斷') + '</div>';
       h += '<p class="small">' + (MG.mode === 'off' ? '目前不合併。' : '找到界線 ' + Object.keys(MI.internal).length + ' 段' + (MI.missing.length ? '；找不到地號：' + R.esc(MI.missing.join('、')) : '')) + '　合併界線不會當作點選成面的邊界。</p>';
     } else h += '<p class="small">尚未匯入圖資。請匯入內網套疊產出的整段地籍 DXF（例：486.dxf），也可同時選取案件 DXF（例：KC1117.dxf）一起套疊。</p>';
-    h += '<div class="sec">圖層顯示</div><div class="btnrow">' + Object.keys(P.ovs).map(function (k) {
-      return '<label class="inline"><input type="checkbox" data-ovvis="' + k + '"' + (P.ovs[k].visible !== false ? ' checked' : '') + '>' + R.esc(P.ovs[k].name) + '</label>';
-    }).join('') + '</div>';
+    h += '<div class="sec">圖層顯示／鎖定</div><table class="flist lockt"><thead><tr><th>圖層</th><th>顯示</th><th>鎖定</th></tr></thead><tbody>';
+    [['parcel', '地籍線'], ['case', '現況'], ['split', '分割'], ['other', '其他線']].forEach(function (r) {
+      var vis = P.ovs[r[0]] ? '<input type="checkbox" data-ovvis="' + r[0] + '"' + (P.ovs[r[0]].visible !== false ? ' checked' : '') + '>' : '<span class="small">—</span>';
+      h += '<tr><td>' + r[1] + '</td><td>' + vis + '</td><td><input type="checkbox" data-lock="' + r[0] + '"' + (isLocked(r[0]) ? ' checked' : '') + '></td></tr>';
+    });
+    h += '</tbody></table><p class="small">鎖定的圖層不會被點選、斷線、改歸屬或右鍵修改（仍可鎖點到它的交點）。</p>';
     h += '<details class="fold"><summary>線條與文字樣式</summary>';
     h += '<div class="sec">線條樣式（依用途）</div><table class="flist"><thead><tr><th></th><th>顏色</th><th>線寬</th><th>線型</th></tr></thead><tbody>';
     [['parcelLine', '地籍線'], ['caseLine', '現況'], ['splitLine', '分割'], ['otherLine', '其他線']].forEach(function (r) {
@@ -1757,6 +1787,7 @@
       s.addEventListener('change', function () { P.layerRoles[s.dataset.role] = s.value; render(); changed(); });
     });
     $$('[data-ovvis]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.ovvis].visible = c.checked; changed(); render(); }; });
+    $$('[data-lock]', box).forEach(function (c) { c.onchange = function () { setLock(c.dataset.lock, c.checked); }; });
     var mgP = $('#mgParcels', box), mgM = $('#mgMode', box), mgX = $('#mgX', box);
     if (mgP) {
       mgP.onchange = function () { P.merge.parcels = mgP.value; changed(); render(); renderLayerTab(); };
@@ -1958,7 +1989,7 @@
     };
     $$('.steps [data-step]').forEach(function (li) { li.classList.toggle('done', !!done[li.dataset.step]); });
   }
-  function refreshAll() { refreshPanels(); renderPlanSel(); updateOvBadge(); updateSteps(); render(); }
+  function refreshAll() { refreshPanels(); renderPlanSel(); updateOvBadge(); updateSteps(); updateLockBar(); render(); }
 
   /* ================= 鍵盤 ================= */
   function onKey(ev) {
@@ -2011,6 +2042,7 @@
     svg.addEventListener('wheel', function (ev) { closeCtx(); onWheel(ev); }, { passive: false });
     svg.addEventListener('contextmenu', function (ev) { ev.preventDefault(); if (drag) return; openCtx(ev); });
     document.addEventListener('pointerdown', function (ev) { if (!ev.target.closest('#ctx')) closeCtx(); }, true);
+    $('#lockBar').addEventListener('click', function (ev) { var b = ev.target.closest('[data-lockq]'); if (b) setLock(b.dataset.lockq, !isLocked(b.dataset.lockq)); });
     $('#assignBar').addEventListener('click', function (ev) { var b = ev.target.closest('[data-assign]'); if (b) { App.assignTo = b.dataset.assign; renderAssignBar(); } });
     svg.addEventListener('dblclick', function (ev) {
       if (App.tool === 'select' && App.sel && App.sel.kind === 'el') {
@@ -2069,7 +2101,7 @@
     App.lastSnap = snap();
     setTool('select');
     switchTab('case');
-    renderLayerList(); renderProps(); renderPlanSel(); updateOvBadge();
+    renderLayerList(); renderProps(); renderPlanSel(); updateOvBadge(); updateLockBar();
     fitView();
     // 還原自動暫存
     function restore(saved) {

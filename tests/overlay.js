@@ -56,7 +56,7 @@ const OUT = process.argv[2];
   const sel = await pg.evaluate(() => App.sel && App.sel.kind === 'seg' ? App.sel.idx.length : 0);
   check('框選線段選到 ' + sel + ' 段', sel > 0);
   if (sel) {
-    await pg.selectOption('#props [data-k=role]', 'split');
+    await pg.click('#props [data-qr=split]');
     const r = await pg.evaluate(() => App.sel.idx.every(k => App.P.segStyle[k] && App.P.segStyle[k].role === 'split'));
     check('改歸屬為分割', r);
   }
