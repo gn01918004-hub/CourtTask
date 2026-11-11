@@ -187,10 +187,27 @@
       inp.click();
     });
   }
+  /* 開啟舊系統 SVMAP 的 .m02 → 轉成新專案（可直接修改） */
+  function openM02(file) {
+    return readFile(file).then(function (buf) {
+      var m = M02.parse(buf), r = M02.toProject(m);
+      checkpoint();
+      App.P = upgrade(r.project); App.cad = r.cad.lines.length || r.cad.texts.length ? r.cad : null;
+      App.planCads = [App.cad]; fileHandle = null;
+      App.P.fields.caseName = file.name.replace(/\.m02$/i, '');
+      App.P.plans[0].name = '舊檔';
+      App.undo = []; App.redo = []; App.lastSnap = snap(); App.sel = null;
+      refreshAll(); fitView(); autosave();
+      var unk = Object.keys(r.report.unknown).length ? '；略過不支援的物件（影像等）' + Object.keys(r.report.unknown).map(function (k) { return r.report.unknown[k]; }).reduce(function (a, b) { return a + b; }, 0) + ' 個' : '';
+      toast('已開啟舊檔 ' + file.name + '：圖紙物件 ' + r.report.sheet + '、圖資線 ' + r.cad.lines.length + '、文字 ' + r.cad.texts.length + unk, 6000);
+      if (r.report.warnings.length) setTimeout(function () { alert('舊檔轉換說明：\n・' + r.report.warnings.join('\n・') + '\n\n轉換後的文字、表格都可以直接修改；原本的說明表是一般表格，若要改成自動產生，請新增「地上物表」並用點選成面重建地上物。'); }, 300);
+    }).catch(function (e) { alert('無法讀取 .m02：' + (e && e.message || e)); });
+  }
   function openProject() {
-    pickFiles('.ctp,.json').then(function (fs) {
+    pickFiles('.ctp,.json,.m02,.M02').then(function (fs) {
       if (!fs.length) return;
       fileHandle = null;
+      if (/\.m02$/i.test(fs[0].name)) { openM02(fs[0]); return; }
       readFile(fs[0], true).then(function (t) {
         try { loadData(JSON.parse(t)); toast('已開啟 ' + fs[0].name); } catch (e) { alert('無法開啟：' + e.message); }
       });

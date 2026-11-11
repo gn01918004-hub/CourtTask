@@ -401,7 +401,7 @@
     var cx = el.x + el.w / 2, fs = Math.min(el.w * 0.55, 5.04);
     var top = el.y + fs * 1.15, ah = Math.min(5, el.h * 0.18), aw = Math.min(el.w * 0.32, 2.2);
     var s = '<g data-id="' + el.id + '">';
-    s += '<text x="' + n(cx) + '" y="' + n(el.y + fs * 0.55) + '" font-size="' + n(fs) + '" text-anchor="middle" dominant-baseline="central" font-family="' + esc(M.fontFamily('kai')) + '">' + esc(el.label || '北') + '</text>';
+    s += '<text x="' + n(cx) + '" y="' + n(el.y + fs * 0.55) + '" font-size="' + n(fs) + '" text-anchor="middle" dominant-baseline="central" font-family="' + esc(M.fontFamily('kai')) + '">' + esc(el.label != null ? el.label : '北') + '</text>';
     s += '<path d="M' + n(cx) + ' ' + n(top) + ' L' + n(cx - aw / 2) + ' ' + n(top + ah) + ' L' + n(cx + aw / 2) + ' ' + n(top + ah) + ' Z" fill="#000"/>';
     s += '<line x1="' + n(cx) + '" y1="' + n(top + ah) + '" x2="' + n(cx) + '" y2="' + n(el.y + el.h) + '" stroke="#000" stroke-width="0.24"/>';
     var hy = top + ah + (el.y + el.h - top - ah) * 0.3;
