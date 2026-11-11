@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>法院略圖繪製系統</title>
+<link rel="stylesheet" href="css/style.css">
+<style id="pageStyle">@page{size:420mm 297mm;margin:0}</style>
+</head>
+<body>
+<div id="app">
+  <header id="toolbar">
+    <div class="brand">法院略圖繪製系統</div>
+    <div class="grp">
+      <button data-cmd="new" title="新案件">新案件</button>
+      <button data-cmd="open" title="開啟專案 (Ctrl+O)">開啟</button>
+      <button data-cmd="save" title="儲存 (Ctrl+S)">儲存</button>
+      <button data-cmd="saveas" title="另存新檔 (Ctrl+Shift+S)">另存</button>
+    </div>
+    <div class="grp">
+      <button data-cmd="import" class="primary" title="匯入整段地籍 DXF 與案件 DXF">匯入 DXF</button>
+    </div>
+    <div class="grp tools">
+      <button data-tool="select" title="選取 (V)">↖ 選取</button>
+      <button data-tool="pan" title="移動圖面／裁切位置 (H)">✥ 移動圖面</button>
+      <button data-tool="face" title="點選成面 (F)">▣ 點選成面</button>
+      <button data-tool="poly" title="手繪多邊形 (P)">⬠ 多邊形</button>
+      <button data-tool="line" title="畫線 (L)">╱ 畫線</button>
+      <button data-tool="text" title="文字 (T)">T 文字</button>
+    </div>
+    <div class="grp">
+      <span class="lbl">新增</span>
+      <button data-cmd="add-map" title="新增略圖框（可多張，各自比例尺與裁切大小）">略圖框</button>
+      <button data-cmd="add-text">文字</button>
+      <button data-cmd="add-table">表格</button>
+      <button data-cmd="add-ftable">地上物表</button>
+      <button data-cmd="add-north">指北</button>
+      <button data-cmd="add-rect">框</button>
+      <button data-cmd="add-line">線</button>
+    </div>
+    <div class="grp">
+      <button data-cmd="undo" title="復原 (Ctrl+Z)">↶</button>
+      <button data-cmd="redo" title="重做 (Ctrl+Y)">↷</button>
+      <button data-cmd="zout">−</button><span id="zoomLbl" class="lbl">100%</span><button data-cmd="zin">＋</button>
+      <button data-cmd="fit" title="整頁 (0)">整頁</button>
+      <button data-cmd="z100" title="實際大小">1:1</button>
+    </div>
+    <div class="grp right">
+      <button data-cmd="printA3" class="primary">列印 A3</button>
+      <button data-cmd="print8k">8K 套印</button>
+      <button data-cmd="help">說明</button>
+    </div>
+  </header>
+
+  <aside id="left">
+    <nav class="tabs">
+      <button data-tab="case">案件資料</button>
+      <button data-tab="feat">地上物</button>
+      <button data-tab="layer">圖層</button>
+      <button data-tab="out">輸出</button>
+    </nav>
+    <div class="tabbody">
+      <section class="tabpane" id="tab-case"></section>
+      <section class="tabpane" id="tab-feat" hidden></section>
+      <section class="tabpane" id="tab-layer" hidden></section>
+      <section class="tabpane" id="tab-out" hidden></section>
+    </div>
+  </aside>
+
+  <main id="stage">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div id="toolTip"></div>
+  </main>
+
+  <aside id="right">
+    <div class="rhead">屬性</div>
+    <div id="props"></div>
+    <div class="rhead">版面元件</div>
+    <div id="elList"></div>
+  </aside>
+
+  <footer id="status"><span id="coord"></span><span id="saveState"></span></footer>
+</div>
+
+<div id="printArea"></div>
+<div id="toast"></div>
+
+<dialog id="dlgNew">
+  <h3>新案件</h3>
+  <p class="small">選擇版面範本（會清空目前的案件資料與圖資，請先儲存）：</p>
+  <div id="tplList"></div>
+  <div class="btnrow"><button id="btnNewOk" class="primary">建立</button><button onclick="this.closest('dialog').close()">取消</button></div>
+</dialog>
+
+<dialog id="dlgHelp">
+  <h3>作業流程</h3>
+  <ol>
+    <li><b>匯入 DXF</b>：選取內網套疊產出的整段地籍圖（如 486.dxf，含 LIN 地籍線、PAR 地號、REF_LINE0 案件線）。可一次多選（例如另加案件 KC1117.dxf）。到「圖層」頁確認各圖層用途。</li>
+    <li><b>裁切</b>：略圖框會自動置中於本案地號。用「移動圖面(H)」拖曳框內調整位置；選取略圖框後在右側設定比例尺與裁切大小（cm），或直接拖拉框的控制點。不必再手動裁切 DXF；需要時可「匯出裁切 DXF」。</li>
+    <li><b>地上物</b>：用「點選成面(F)」在每個區塊內點一下，自動成面並計算面積、編號 A、B、C…；在「地上物」頁填寫使用地號、備註。說明表自動產生。</li>
+    <li><b>案件資料</b>：填寫左側欄位（土地坐落、囑託法院及文號、囑託事項、收件、鑑測日期…），版面自動帶入。</li>
+    <li><b>版面</b>：所有元件都可拖曳、縮放；表格可拖拉格線調整欄寬列高、插入/刪除列欄、合併儲存格。可新增多個略圖框。</li>
+    <li><b>輸出</b>：列印 A3（1:1）；在「輸出」頁框選範圍後「8K 套印」，會自動放在 8K 紙左下角平移 X20、Y20 處。</li>
+    <li><b>核定後</b>：填入核定日期 → 再印 A3 份數。</li>
+  </ol>
+  <p class="small">本系統為單機網頁，不需網路與安裝。資料只存在本機：專案檔 (.ctp) 請自行存放；瀏覽器另有自動暫存。</p>
+  <div class="btnrow"><button onclick="this.closest('dialog').close()">關閉</button></div>
+</dialog>
+
+<script src="js/geom.js"></script>
+<script src="js/dxf.js"></script>
+<script src="js/model.js"></script>
+<script src="js/render.js"></script>
+<script src="js/print.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
