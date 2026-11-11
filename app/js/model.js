@@ -130,7 +130,7 @@
       output: { k8: { w: 267, h: 388, offX: 20, offY: 20, dx: 0, dy: 0, region: null } },
       settings: { snapEdges: true, faceWithParcel: true, codeScheme: 'alpha' },
       splits: {},
-      ovs: { case: { name: '現況', visible: true, codeScheme: 'alpha' }, split: { name: '分割', visible: true, codeScheme: 'alpha' } },
+      ovs: { case: { name: '現況', visible: true, codeScheme: 'alpha' }, split: { name: '分割', visible: true, codeScheme: 'stem', schemeSet: true } },
       activeOv: 'case',
       merge: { parcels: '', mode: 'x', xSize: 3 },
       plans: [{ name: '方案1', data: null }], planIdx: 0

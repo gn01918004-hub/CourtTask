@@ -137,6 +137,7 @@
     P.segStyle = P.segStyle || {}; P.textOver = P.textOver || {}; P.layerRoles = P.layerRoles || {}; P.splits = P.splits || {};
     if (!P.plans || !P.plans.length) { P.plans = [{ name: '方案1', data: null }]; P.planIdx = 0; }
     P.ovs = P.ovs || clone(base.ovs); P.activeOv = P.activeOv || 'case'; P.merge = P.merge || clone(base.merge);
+    if (P.ovs.split && !P.ovs.split.schemeSet) { P.ovs.split.codeScheme = 'stem'; P.ovs.split.schemeSet = true; }
     if (P.settings.codeScheme && !P.ovs.case._mig) { P.ovs.case.codeScheme = P.ovs.case.codeScheme || P.settings.codeScheme; }
     ['parcelLine', 'caseLine', 'splitLine', 'otherLine'].forEach(function (k) { P.styles[k] = Object.assign({}, base.styles[k], P.styles[k] || {}); });
     P.elements.forEach(function (e) {
@@ -318,7 +319,11 @@
       if (!e.stackBelow) return;
       var up = elById(e.stackBelow); if (!up) { delete e.stackBelow; return; }
       var b = R.bounds(up, App.P);
-      e.x = up.x; e.y = Math.round((b.y + b.h + 6) * 100) / 100;
+      e.x = up.x; e.y = Math.round((b.y + b.h + (e.stackGap != null ? e.stackGap : 6)) * 100) / 100;
+      if (e.matchWidth && e.cols && e.cols.length) {   // 寬度與上表一致（依比例調整欄寬）
+        var tot = e.cols.reduce(function (a, c) { return a + c; }, 0);
+        if (tot > 0 && Math.abs(tot - b.w) > 0.05) e.cols = e.cols.map(function (c) { return Math.round(c * b.w / tot * 100) / 100; });
+      }
     });
   }
   function renderNow() {
@@ -738,7 +743,7 @@
       }
       case 'move':
         if (!drag.moved && Math.hypot(dx, dy) < 2 / App.view.z) return;
-        drag.moved = true; el = drag.el; o = drag.orig; delete el.stackBelow;
+        drag.moved = true; el = drag.el; o = drag.orig; delete el.stackBelow; delete el.matchWidth;
         var sd = ev.altKey ? [dx, dy] : snapMove(el, drag.b, dx, dy);
         el.x = round(o.x + sd[0], 2); el.y = round(o.y + sd[1], 2); break;
       case 'resize': resizeEl(drag, dx, dy, ev); break;
@@ -830,7 +835,7 @@
       el.cols = cols.map(function (c) { return round(c, 2); });
       return;
     }
-    var tmo = R.tableModel(o, App.P), rows = tmo.rows.slice(), dl = dy;
+    var tmo = R.tableModel(o, App.P), rows = (el.type === 'table' ? o.rows : tmo.rows).slice(), dl = dy;   // 一般表格以設定列高為準（不含自動撐高）
     if (i < rows.length - 1 && !d.shift) {
       dl = Math.max(1 - rows[i], Math.min(rows[i + 1] - 1, dl));
       rows[i] += dl; rows[i + 1] -= dl;
@@ -871,9 +876,9 @@
   }
 
   /* ================= 說明項目 ================= */
-  function ovFeatures() { return App.P.features; }
-  function ovScheme() { return App.P.settings.codeScheme || (App.P.ovs.case && App.P.ovs.case.codeScheme) || 'alpha'; }
-  function nextCodeOv() { return M.nextCode(App.P.features, ovScheme()); }
+  function ovFeatures(ov) { return ov ? App.P.features.filter(function (f) { return (f.ov || 'case') === ov; }) : App.P.features; }
+  function ovScheme(ov) { ov = ov || App.P.activeOv || 'case'; var o = App.P.ovs[ov] || {}; return o.codeScheme || (ov === 'split' ? 'stem' : 'alpha'); }
+  function nextCodeOv() { var ov = App.P.activeOv || 'case'; return M.nextCode(ovFeatures(ov), ovScheme(ov)); }
   function arcAdj(pts) { return App.cad ? round(G.arcCorrection(pts, App.cad.arcs), 6) : 0; }
   function faceSegs(m, pts) {
     var P = App.P, segs = [], R2 = Math.max(m.w, m.h) * m.scale / 1000, bx = G.bbox(pts);
@@ -1097,6 +1102,33 @@
   var DASH_SHORT = [['solid', '實線'], ['dash', '虛線'], ['dashS', '短虛'], ['dot', '點線'], ['dashDot', '鏈線']];
   var COLORS = [['#ff0000', '紅'], ['#0050ff', '藍'], ['#000000', '黑'], ['#00a000', '綠'], ['#ff66cc', '粉']];
   var WIDTHS = [0.1, 0.15, 0.2, 0.3, 0.5];
+  /* 表格右鍵：新增／刪除欄列、合併、解除合併。先點格子（Shift 可多選）再按右鍵 */
+  function tableCtxRows(el, p, rows) {
+    var rc = cellAtPoint(el, p), g = cellRange();
+    if (rc && (!g || rc.r < g.r0 || rc.r > g.r1 || rc.c < g.c0 || rc.c > g.c1)) { App.selCell = { r0: rc.r, c0: rc.c, r1: rc.r, c1: rc.c }; g = cellRange(); }
+    if (!g) return;
+    var multi = g.r1 > g.r0 || g.c1 > g.c0;
+    if (el.type === 'table') {
+      rows.push({ label: '列', chips: [['上方插入', function () { TableOps.insertRow(el, g.r0); }], ['下方插入', function () { TableOps.insertRow(el, g.r1 + 1); }], ['刪除', function () { TableOps.deleteRow(el, g.r0); App.selCell = null; }]] });
+      rows.push({ label: '欄', chips: [['左側插入', function () { TableOps.insertCol(el, g.c0); }], ['右側插入', function () { TableOps.insertCol(el, g.c1 + 1); }], ['刪除', function () { TableOps.deleteCol(el, g.c0); App.selCell = null; }]] });
+      if (multi) rows.push({ item: '合併選取的格子', fn: function () { TableOps.merge(el, g); App.selCell = { r0: g.r0, c0: g.c0, r1: g.r0, c1: g.c0 }; } });
+      rows.push({ item: '解除合併', fn: function () { TableOps.split(el, g); } });
+    } else {
+      var tm = R.tableModel(el, App.P), kinds = tm.kinds;
+      var isData = function (r) { var k = kinds[r]; return k && k !== 'title' && k !== 'header' && k !== 'notes'; };
+      rows.push({ label: '欄', chips: [['右側新增', function () { el.columns.splice(g.c1 + 1, 0, { key: 'extra', header: '其他' }); el.cols.splice(g.c1 + 1, 0, 15); }], ['刪除此欄', function () { if (el.columns.length > 1) { el.columns.splice(g.c0, 1); el.cols.splice(g.c0, 1); el.merges = []; } }]] });
+      rows.push({ item: '新增空白列（只在表格，不在圖上）', fn: function () { var ov = el.ov || App.P.activeOv || 'case'; App.P.features.push({ id: M.uid(), ov: ov, code: M.nextCode(ovFeatures(ov), ovScheme(ov)), pts: [], landNo: App.P.fields.landNo || '', note: '', label: false, tableOnly: true }); } });
+      if (multi && isData(g.r0) && isData(g.r1)) rows.push({ item: '合併選取的格子（例如相同所有權人）', fn: function () {
+        el.merges = (el.merges || []).filter(function (mg) { var r0 = kinds.indexOf(mg.fid); return !(r0 <= g.r1 && r0 + (mg.n || 1) - 1 >= g.r0 && mg.c <= g.c1 && mg.c + (mg.cs || 1) - 1 >= g.c0); });
+        el.merges.push({ fid: kinds[g.r0], n: g.r1 - g.r0 + 1, c: g.c0, cs: g.c1 - g.c0 + 1 });
+        App.selCell = { r0: g.r0, c0: g.c0, r1: g.r0, c1: g.c0 };
+      } });
+      if ((el.merges || []).length) rows.push({ item: '解除合併', fn: function () {
+        el.merges = (el.merges || []).filter(function (mg) { var r0 = kinds.indexOf(mg.fid); return !(r0 <= g.r1 && r0 + (mg.n || 1) - 1 >= g.r0 && mg.c <= g.c1 && mg.c + (mg.cs || 1) - 1 >= g.c0); });
+      } });
+    }
+    rows.push({ item: '編輯表格（拉格線、Shift 多選）', fn: function () { setTableEdit(el.id); } });
+  }
   function closeCtx() { var c = $('#ctx'); if (c) { c.hidden = true; c.innerHTML = ''; } }
   function openCtx(ev) {
     var p = toPaper(ev), m = mapAt(p), P = App.P, rows = [], title = '';
@@ -1141,14 +1173,15 @@
     } else {
       var el = hitElement(p);
       if (el) {
-        select({ kind: 'el', id: el.id }); title = el.name || '元件';
+        var same = App.sel && App.sel.kind === 'el' && App.sel.id === el.id;
+        select({ kind: 'el', id: el.id }, same); title = el.name || '元件';   // 同一張表保留已選的格子
         if (el.type === 'map') {
           rows.push({ item: el.lockCrop ? '解除鎖定裁切' : '鎖定裁切（不再誤移圖）', fn: function () { el.lockCrop = !el.lockCrop; } });
           rows.push({ item: '在這裡點選成面', fn: function () { addFaceAt(el, R.mapView(el).toW(p[0], p[1]), false); } });
           rows.push({ label: '置中', chips: [['案件線', function () { centerMap(el, 'case'); }], ['本案地號', function () { centerMap(el, 'target'); }], ['說明項目', function () { centerMap(el, 'features'); }]] });
           rows.push({ item: '在這裡加註記文字', fn: function () { var w = R.mapView(el).toW(p[0], p[1]); var a = { id: M.uid(), x: round(w[0], 3), y: round(w[1], 3), text: '註記', size: P.styles.anno.size }; P.annos.push(a); setTimeout(function () { select({ kind: 'anno', id: a.id, mapId: el.id }); var t = $('#props textarea'); if (t) { t.focus(); t.select(); } }, 0); } });
         }
-        if (el.type === 'table' || el.type === 'ftable') rows.push({ item: '編輯表格（拉格線、合併）', fn: function () { setTableEdit(el.id); } });
+        if (el.type === 'table' || el.type === 'ftable') tableCtxRows(el, p, rows);
         rows.push({ item: '複製', fn: function () { duplicateEl(el.id); } });
         rows.push({ label: '圖層順序', chips: [['最上層', function () { reorder(el.id, 'top'); }], ['最下層', function () { reorder(el.id, 'bottom'); }]] });
         rows.push({ item: el.locked ? '解除鎖定' : '鎖定位置', fn: function () { el.locked = !el.locked; } });
@@ -1554,7 +1587,9 @@
     var b = R.bounds(first, P), t2 = clone(first);
     t2.id = M.uid(); t2.name = '分割方案說明表'; t2.ov = 'split'; t2.rowHs = {};
     applyTableStyle(t2, 'owner'); t2.title = '{landNo}地號分割方案說明：';
-    t2.y = Math.round((b.y + b.h + 6) * 100) / 100; t2.stackBelow = first.id;   // 自動接在地上物說明表下方（手動拖動後就不再跟隨）
+    t2.stackBelow = first.id; t2.stackGap = 0; t2.matchWidth = true;   // 直接接在地上物說明表下方、同寬（手動拖動後就不再跟隨）
+    t2.notes = first.notes; t2.notesH = first.notesH || 8.5; t2.notesFs = first.notesFs; first.notesH = 0;   // 附註只放在最下面
+    t2.y = Math.round((b.y + b.h) * 100) / 100;
     first.name = '地上物說明表';
     P.elements.push(t2);
     renderLayerList();
@@ -1704,38 +1739,45 @@
     };
   }
   function renderFeatTab() {
-    var box = $('#tab-feat'), P = App.P, h = '', ov = P.activeOv || 'case', OV = { codeScheme: ovScheme() };
-    var hv2 = presentOvs();
-    h += '<p class="small">' + (hv2.case && hv2.split ? '圖上有現況與分割，點選成面用「地籍線＋<b>' + R.esc(P.ovs[ov].name) + '</b>線」當邊界（頂端「編輯」切換）。' : '點選成面用「地籍線＋圖上的' + (hv2.split ? '分割' : '現況') + '線」當邊界。') + '「標號」只放編號、不算面積。</p>';
-    h += '<div class="btnrow">' + btn('toolFace', '點選成面 (F)', 'primary') + btn('toolMark', '標號 (M)') + btn('toolPoly', '手繪多邊形 (P)') + '</div>';
+    var box = $('#tab-feat'), P = App.P, h = '', act = P.activeOv || 'case';
+    var hv = presentOvs(), blocks = ['case', 'split'].filter(function (k) { return hv[k] || ovFeatures(k).length; });
+    if (!blocks.length) blocks = [act];
+    var two = blocks.length > 1;
     var LC = P.settings.flistCols || ['landNo', 'note'], LN = { landNo: '地號', note: '備註', owner: '所有權人', extra: '其他' };
-    h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th><th>' + LN[LC[0]] + '</th><th>' + LN[LC[1]] + '</th><th></th></tr></thead><tbody>';
-    var total = 0, list = ovFeatures(ov);
-    list.forEach(function (f) {
-      var a = parseFloat(R.featureArea(f, 2)) || 0; total += a;
-      var on = App.sel && App.sel.id === f.id ? ' class="on"' : '';
-      var calc = (G.area(f.pts) + (f.arcAdj || 0)).toFixed(2);
-      h += '<tr data-fid="' + f.id + '"' + on + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td>' +
-        '<td><input data-f="areaOverride" class="num" placeholder="' + calc + '" value="' + R.esc(f.areaOverride == null ? '' : f.areaOverride) + '" title="空白＝系統計算值 ' + calc + '；可直接輸入內網計算系統的面積"></td>' +
-        '<td><input data-f="' + LC[0] + '" value="' + R.esc(f[LC[0]] || '') + '"></td><td><input data-f="' + LC[1] + '" value="' + R.esc(f[LC[1]] || '') + '"></td>' +
-        '<td class="ops"><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
+    h += '<div class="btnrow">' + btn('toolFace', '點選成面 (F)', 'primary') + btn('toolMark', '標號 (M)') + btn('toolPoly', '手繪多邊形 (P)') + '</div>';
+    if (two) h += '<p class="small">現況與分割各一張表、編號各自計算。點區塊標題切換「新增到哪一層」（同頂端「編輯」）。</p>';
+    blocks.forEach(function (ov) {
+      var list = ovFeatures(ov), total = 0, on = ov === act;
+      if (two) h += '<div class="fblock' + (on ? ' on' : '') + '"><div class="fbhead" data-ov="' + ov + '"><b>' + (ov === 'split' ? '分割（分割方案說明）' : '現況（地上物說明）') + '</b>' +
+        (on ? '<span class="tag">新增到這裡</span>' : '<span class="small">點這裡切換</span>') + '</div>';
+      h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th><th>' + LN[LC[0]] + '</th><th>' + LN[LC[1]] + '</th><th></th></tr></thead><tbody>';
+      list.forEach(function (f) {
+        var a = parseFloat(R.featureArea(f, 2)) || 0; total += a;
+        var sel2 = App.sel && App.sel.id === f.id ? ' class="on"' : '';
+        var calc = f.pt || !f.pts || f.pts.length < 3 ? '' : (G.area(f.pts) + (f.arcAdj || 0)).toFixed(2);
+        h += '<tr data-fid="' + f.id + '"' + sel2 + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td>' +
+          '<td><input data-f="areaOverride" class="num" placeholder="' + calc + '" value="' + R.esc(f.areaOverride == null ? '' : f.areaOverride) + '" title="空白＝系統計算值；可直接輸入內網計算系統的面積"></td>' +
+          '<td><input data-f="' + LC[0] + '" value="' + R.esc(f[LC[0]] || '') + '"></td><td><input data-f="' + LC[1] + '" value="' + R.esc(f[LC[1]] || '') + '"></td>' +
+          '<td class="ops"><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
+      });
+      h += '</tbody></table>';
+      h += '<div class="btnrow"><span class="small">合計 ' + total.toFixed(2) + ' m²（' + list.length + ' 筆）　編號</span>' +
+        '<select data-scheme="' + ov + '">' + [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']].map(function (o) { return '<option value="' + o[0] + '"' + (ovScheme(ov) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
+        '<button data-recode="' + ov + '">重新編號</button><button data-addrow="' + ov + '" title="只在說明表加一列（不在圖上）">＋空白列</button></div>';
+      if (two) h += '</div>';
     });
-    h += '</tbody></table>';
-    h += '<p class="small">面積欄空白＝系統計算值（灰字），也可以直接填入內網計算系統的面積。合計 ' + total.toFixed(2) + ' m²（' + list.length + ' 筆）。清單欄位：' +
+    h += '<p class="small">面積欄空白＝系統計算值（灰字），可直接填入內網計算系統的面積。清單欄位：' +
       '<select id="flc0">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[0] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select>' +
       '<select id="flc1">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[1] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select></p>';
-    h += '<div class="btnrow"><span class="small">編號方式</span>' + sel('_scheme', OV.codeScheme || 'alpha', [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']]) + '</div>';
-    h += '<div class="btnrow">' + btn('recode', '依序重新編號') + btn('sortCode', '依編號排序') + '</div>';
     var FR = P.settings.faceRoles || { parcel: true, other: false };
-    h += '<div class="sec">點選成面設定</div><div class="btnrow">' +
+    h += '<details class="fold"><summary>點選成面設定</summary><div class="btnrow">' +
       '<label class="inline"><input type="checkbox" data-fr="parcel"' + (FR.parcel !== false ? ' checked' : '') + '>地籍線當邊界</label>' +
       '<label class="inline"><input type="checkbox" data-fr="other"' + (FR.other ? ' checked' : '') + '>其他線當邊界</label></div>' +
-      '<p class="small">Shift+點選：把相鄰區塊併入目前選取的說明項目。假合併的界線（打 X 的線）不會當邊界。</p>';
-    h += '<details><summary class="small">面積配賦（選用）</summary><div class="btnrow"><span class="small">登記總面積</span><input id="regArea" type="number" step="0.01" style="width:110px" value="' + (P.settings.regArea || '') + '">' +
-      btn('distribute', '配賦尾差') + btn('undistribute', '清除面積') + '</div></details>';
+      '<p class="small">Shift+點選：把相鄰區塊併入目前選取的說明項目。假合併的界線（打 X 的線）不會當邊界。</p>' +
+      '<div class="btnrow"><span class="small">面積配賦：登記總面積</span><input id="regArea" type="number" step="0.01" style="width:100px" value="' + (P.settings.regArea || '') + '">' + btn('distribute', '配賦') + '</div></details>';
     box.innerHTML = h;
     $$('[data-fr]', box).forEach(function (c) { c.onchange = function () { P.settings.faceRoles = Object.assign({}, FR); P.settings.faceRoles[c.dataset.fr] = c.checked; changed(); }; });
-    $('[data-k=_scheme]', box).onchange = function () { P.settings.codeScheme = this.value; changed(); };
+    $$('[data-scheme]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.scheme].codeScheme = c.value; changed(); }; });
     ['flc0', 'flc1'].forEach(function (id, i) { $('#' + id, box).onchange = function () { var lc = LC.slice(); lc[i] = this.value; P.settings.flistCols = lc; renderFeatTab(); }; });
     $('#regArea', box).onchange = function () { P.settings.regArea = this.value; changed(); };
     $$('input[data-f]', box).forEach(function (i) {
@@ -1746,27 +1788,22 @@
       i.addEventListener('focus', function () { var f = featById(i.closest('tr').dataset.fid); App.sel = { kind: 'feature', id: f.id, mapId: (maps()[0] || {}).id }; renderProps(); render(); });
     });
     box.onclick = function (ev) {
+      var hd = ev.target.closest('.fbhead[data-ov]'); if (hd) { setActiveOv(hd.dataset.ov); return; }
+      var rc = ev.target.closest('[data-recode]');
+      if (rc) { ovFeatures(rc.dataset.recode).forEach(function (f, i) { f.code = M.codeAt(i, ovScheme(rc.dataset.recode)); }); changed(); render(); renderFeatTab(); return; }
+      var ar = ev.target.closest('[data-addrow]');
+      if (ar) { var ov2 = ar.dataset.addrow, nf = { id: M.uid(), ov: ov2, code: M.nextCode(ovFeatures(ov2), ovScheme(ov2)), pts: [], landNo: P.fields.landNo || '', note: '', label: false, tableOnly: true }; P.features.push(nf); ensureSplitTables(); changed(); render(); renderFeatTab(); return; }
       var a = ev.target.closest('[data-act]');
       if (a) {
         if (a.dataset.act === 'toolFace') setTool('face');
         if (a.dataset.act === 'toolPoly') setTool('poly');
         if (a.dataset.act === 'toolMark') setTool('mark');
         if (a.dataset.act === 'distribute') distributeArea(parseFloat($('#regArea', box).value));
-        if (a.dataset.act === 'undistribute') { list.forEach(function (f) { f.areaOverride = null; }); changed(); render(); renderFeatTab(); }
-        if (a.dataset.act === 'recode') { list.forEach(function (f, i) { f.code = M.codeAt(i, OV.codeScheme); }); changed(); render(); renderFeatTab(); }
-        if (a.dataset.act === 'sortCode') {
-          var order = {}; for (var i = 0; i < 300; i++) order[M.codeAt(i, OV.codeScheme)] = i;
-          var sorted = list.slice().sort(function (x, y) { var a1 = order[x.code], b1 = order[y.code]; return (a1 == null ? 999 : a1) - (b1 == null ? 999 : b1) || (x.code < y.code ? -1 : 1); });
-          var others = P.features.filter(function (f) { return list.indexOf(f) < 0; });
-          P.features = others.concat(sorted);
-          changed(); render(); renderFeatTab();
-        }
         return;
       }
       var b = ev.target.closest('[data-fop]');
       if (b) {
-        var id = b.closest('tr').dataset.fid, j = list.findIndex(function (f) { return f.id === id; });
-        var f = list[j], gi = P.features.indexOf(f);
+        var id = b.closest('tr').dataset.fid, f = featById(id), list = ovFeatures(f.ov || 'case'), j = list.indexOf(f), gi = P.features.indexOf(f);
         if (b.dataset.fop === 'del') P.features.splice(gi, 1);
         var nb = b.dataset.fop === 'up' ? list[j - 1] : b.dataset.fop === 'down' ? list[j + 1] : null;
         if (nb) { var gj = P.features.indexOf(nb); P.features[gi] = nb; P.features[gj] = f; }

@@ -76,7 +76,7 @@ const SM = p => path.join(__dirname, '..', 'samples', p);
     App.P.features = [{ id: 'x1', ov: 'case', code: 'A', pts: [[0, 0], [10, 0], [10, 10], [0, 10]], landNo: '486', note: '這是一段很長的備註文字需要換行顯示' }];
     ft.columns = [{ key: 'code', header: '編號' }, { key: 'area', header: '面積' }, { key: 'note', header: '備註' }]; ft.cols = [15, 20, 20]; ft.ov = '';
     const dr = () => { const tm = Render.tableModel(ft, App.P); return tm.rows[tm.kinds.indexOf('x1')]; };
-    const h0 = dr(); ft.autoRowH = true;
+    ft.autoRowH = false; const h0 = dr(); ft.autoRowH = true;
     const h1 = dr(); App.P.features = []; return [h0, h1];
   });
   check('說明表列高自動 ' + rh.join(' → '), rh[1] > rh[0]);

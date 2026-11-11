@@ -33,9 +33,37 @@ const OUT = process.argv[2];
   p = await toS(pts.p3[0], pts.p3[1]); await pg.mouse.click(p[0], p[1]);
   const feats = await pg.evaluate(() => App.P.features.map(f => (f.ov || 'case') + ':' + f.code + '=' + Render.featureArea(f, 2)));
   console.log('features', feats.join(' '));
-  check('現況與分割同一份清單、同一套編號 A B C', feats.join(' ').indexOf('case:A') >= 0 && feats.some(s => s.startsWith('split:B')) && feats.some(s => s.startsWith('split:C')));
+  check('現況、分割各自編號（現況 A、分割 甲乙）', feats.some(s => s.startsWith('case:A')) && feats.some(s => s.startsWith('split:甲')) && feats.some(s => s.startsWith('split:乙')));
   const tabs = await pg.evaluate(() => App.P.elements.filter(e => e.type === 'ftable').map(e => e.ov + ':' + e.title));
   check('現況＋分割自動分成兩張說明表 ' + JSON.stringify(tabs), tabs.length === 2 && tabs.some(t => /^case:.*地上物說明/.test(t)) && tabs.some(t => /^split:.*分割方案說明/.test(t)));
+  await pg.waitForTimeout(100);
+  const st = await pg.evaluate(() => {
+    const fts = App.P.elements.filter(e => e.type === 'ftable'), a = fts.find(e => e.ov === 'case'), b = fts.find(e => e.ov === 'split');
+    const ba = Render.bounds(a, App.P), bb = Render.bounds(b, App.P);
+    return { gap: Math.round((bb.y - (ba.y + ba.h)) * 100) / 100, wa: Math.round(ba.w * 10) / 10, wb: Math.round(bb.w * 10) / 10, notesTop: a.notesH, notesBottom: b.notesH };
+  });
+  check('兩張表接在一起、同寬、附註只在下表 ' + JSON.stringify(st), st.gap === 0 && st.wa === st.wb && st.notesTop === 0 && st.notesBottom > 0);
+  // 分割表右鍵：合併兩列的「所有權人」
+  const cellP = await pg.evaluate(() => {
+    const b = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'), tm = Render.tableModel(b, App.P);
+    const r0 = tm.kinds.findIndex(k => k !== 'title' && k !== 'header' && k !== 'notes');
+    App.api.selectFn({ kind: 'el', id: b.id }); App.selCell = { r0: r0, c0: 2, r1: r0 + 1, c1: 2 };
+    const rc = Render.cellRect(b, tm, { r: r0, c: 2 }); const r = document.getElementById('svg').getBoundingClientRect();
+    return [r.left + (rc.x + rc.w / 2 - App.view.ox) * App.view.z, r.top + (rc.y + rc.h / 2 - App.view.oy) * App.view.z];
+  });
+  await pg.mouse.click(cellP[0], cellP[1], { button: 'right' });
+  await pg.click('#ctx .ctx-item:has-text("合併選取的格子")');
+  const mg2 = await pg.evaluate(() => { const b = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'); const tm = Render.tableModel(b, App.P); return { merges: (b.merges || []).length, rs: (tm.cells.find(c => c.merged) || {}).rs }; });
+  check('說明表右鍵合併兩列 ' + JSON.stringify(mg2), mg2.merges === 1 && mg2.rs === 2);
+  // 左側說明欄：字不縮小、自動換行加高，表格總高不變
+  const lt = await pg.evaluate(() => {
+    App.P.fields.courtDoc = '臺灣苗栗地方法院112年4月11日苗院雅民仁111重訴37字第11048號函，另依同年5月2日補充函辦理，並請一併檢附相關圖說資料以供參考。';
+    const t = App.P.elements.find(e => e.type === 'table'), tm = Render.tableModel(t, App.P);
+    const sum = a => Math.round(a.reduce((x, y) => x + y, 0) * 100) / 100;
+    const c = tm.cells.find(c => c.r === 3 && c.c === 1);
+    return { set: t.rows[3], shown: tm.rows[3], totalSet: sum(t.rows), totalShown: sum(tm.rows), fs: c.fs, fit: c.fit || '' };
+  });
+  check('說明欄自動加高列高、字高不變、總高不變 ' + JSON.stringify(lt), lt.shown > lt.set && lt.totalSet === lt.totalShown && lt.fs === 4.15 && lt.fit === '');
   // 分割的面不受現況線影響：split 面積 = 只用地籍線+分割線的面
   const ok = await pg.evaluate(() => {
     const m = App.P.elements.find(e => e.type === 'map'); const f = App.P.features.find(f => f.ov === 'split');

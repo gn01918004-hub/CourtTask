@@ -283,47 +283,96 @@
   }
 
   /* ---------- 表格模型 ---------- */
+  /* 表格排版：文字維持設定的字高，放不下就換行並自動加高列高（行距舒適）。
+     el.autoRowH === false 時回到舊行為（列高固定、字縮小）。
+     一般表格另有 keepTotal（預設開）：列被撐高時，從最空的列借高度，表格總高不變。 */
+  var LH = 1.3;
+  function needH(text, w, fs, font, lh) {
+    if (!text) return 0;
+    return M.wrap(text, Math.max(1, w - 1.6), fs, font || 'kai').length * fs * (lh || LH) + 1.6;
+  }
+  function spanW(cols, c, cs) { var w = 0; for (var i = c; i < c + (cs || 1) && i < cols.length; i++) w += cols[i]; return w; }
   function tableModel(el, P) {
     var F = fieldsOf(P);
     if (el.type === 'table') {
-      return {
-        cols: el.cols, rows: el.rows,
-        cells: el.cells.map(function (c) { var o = Object.assign({}, c); o.text = M.fill(c.text, F); return o; }),
-        kinds: null
-      };
+      var rows = el.rows.slice(), auto = el.autoRowH !== false;
+      var cells = el.cells.map(function (c) { var o = Object.assign({}, c); o.text = M.fill(c.text, F); return o; });
+      if (auto) {
+        var need = rows.map(function () { return 0; });
+        cells.forEach(function (c) {
+          if (c.fit === 'shrink' || !c.text) return;
+          if (!c.lh && c.text.indexOf('\n') < 0) c.lh = LH;
+          var h = needH(c.text, spanW(el.cols, c.c, c.cs), c.fs || 4, c.font, c.lh || LH);
+          var rs = c.rs || 1, have = 0, i;
+          for (i = c.r; i < c.r + rs && i < rows.length; i++) have += rows[i];
+          if (rs === 1) need[c.r] = Math.max(need[c.r], h);
+          else if (h > have) { var last = Math.min(rows.length - 1, c.r + rs - 1); need[last] = Math.max(need[last], rows[last] + h - have); }
+        });
+        var excess = 0;
+        rows = rows.map(function (r, i) { if (need[i] > r + 0.01) { excess += need[i] - r; return Math.round(need[i] * 100) / 100; } return r; });
+        if (excess > 0 && el.keepTotal !== false) {
+          // 從空間最多的列借高度（不小於該列內容所需）
+          var order = rows.map(function (r, i) { return i; }).sort(function (a, b) { return (rows[b] - Math.max(need[b], 4)) - (rows[a] - Math.max(need[a], 4)); });
+          order.forEach(function (i) {
+            if (excess <= 0) return;
+            var slack = rows[i] - Math.max(need[i], 4); if (slack <= 0) return;
+            var take = Math.min(slack, excess); rows[i] = Math.round((rows[i] - take) * 100) / 100; excess -= take;
+          });
+          // 四捨五入殘差補到最高的那一列，總高與設定完全一致
+          var t0 = el.rows.reduce(function (a, b) { return a + b; }, 0), t1 = rows.reduce(function (a, b) { return a + b; }, 0), d = Math.round((t0 - t1) * 100) / 100;
+          if (d && excess <= 0.001) { var mi = rows.indexOf(Math.max.apply(null, rows)); rows[mi] = Math.round((rows[mi] + d) * 100) / 100; }
+        }
+      }
+      return { cols: el.cols, rows: rows, cells: cells, kinds: null };
     }
-    // 地上物說明表
+    // 說明表（依說明項目自動產生）
     var feats = P.features.filter(function (f) {
       if (f.hideInTable) return false;
       if (el.ov && featOv(f) !== el.ov) return false;
       if (el.landFilter) return String(f.landNo) === String(el.landFilter);
       return true;
     });
-    var rows = [], kinds = [], cells = [], cols = el.columns || [];
+    var rowsF = [], kinds = [], cellsF = [], cols = el.columns || [], autoF = el.autoRowH !== false;
     if (el.titleH > 0) {
-      rows.push(el.titleH); kinds.push('title');
-      cells.push({ r: 0, c: 0, cs: cols.length, text: M.fill(el.title, F), align: 'center', valign: 'middle', fs: el.titleFs, fit: 'shrink' });
+      rowsF.push(el.titleH); kinds.push('title');
+      cellsF.push({ r: 0, c: 0, cs: cols.length, text: M.fill(el.title, F), align: 'center', valign: 'middle', fs: el.titleFs, fit: 'shrink' });
     }
     if (el.headerH > 0) {
-      var hr = rows.length; rows.push(el.headerH); kinds.push('header');
-      cols.forEach(function (c, i) { cells.push({ r: hr, c: i, text: c.header || '', align: 'center', valign: 'middle', fs: el.headerFs, fit: 'shrink' }); });
+      var hr = rowsF.length; rowsF.push(el.headerH); kinds.push('header');
+      cols.forEach(function (c, i) { cellsF.push({ r: hr, c: i, text: c.header || '', align: 'center', valign: 'middle', fs: el.headerFs, fit: 'shrink' }); });
     }
+    var firstData = rowsF.length;
     feats.forEach(function (f) {
-      var r = rows.length, base = el.rowHs[f.id] || el.rowH, need = 0;
+      var r = rowsF.length, base = el.rowHs[f.id] || el.rowH, nd = 0;
       cols.forEach(function (col, c) {
         var v = col.key === 'area' ? featureArea(f, el.decimals) : f[col.key], txt = v == null ? '' : String(v), fs = col.fs || el.dataFs;
-        cells.push({ r: r, c: c, text: txt, align: col.align || 'center', valign: 'middle', fs: fs, fit: el.autoRowH ? '' : 'shrink', fid: f.id });
-        if (el.autoRowH && txt) need = Math.max(need, M.wrap(txt, (el.cols[c] || 10) - 1.6, fs, 'kai').length * fs * 1.12 + 1.6);
+        var numeric = col.key === 'code' || col.key === 'area';   // 編號、面積不換行（太長就縮小）
+        var cell = { r: r, c: c, text: txt, align: col.align || 'center', valign: 'middle', fs: fs, fit: (!autoF || numeric) ? 'shrink' : '', fid: f.id, lh: LH };
+        cellsF.push(cell);
+        if (autoF && !numeric && txt) nd = Math.max(nd, needH(txt, el.cols[c] || 10, fs, 'kai', LH));
       });
-      rows.push(el.autoRowH ? Math.max(base, Math.round(need * 100) / 100) : base); kinds.push(f.id);
+      rowsF.push(autoF ? Math.max(base, Math.round(nd * 100) / 100) : base); kinds.push(f.id);
+    });
+    // 合併儲存格：{ fid: 起始列的說明項目, n: 列數, c: 起始欄, cs: 欄數 }
+    (el.merges || []).forEach(function (mg) {
+      var r0 = kinds.indexOf(mg.fid); if (r0 < 0) return;
+      var n = Math.max(1, Math.min(mg.n || 1, rowsF.length - r0)), cs = Math.max(1, Math.min(mg.cs || 1, cols.length - mg.c));
+      for (var i = r0; i < r0 + n; i++) if (typeof kinds[i] !== 'string' || kinds[i] === 'title' || kinds[i] === 'header' || kinds[i] === 'notes') return;
+      var anchor = null;
+      cellsF = cellsF.filter(function (c) {
+        var inside = c.r >= r0 && c.r < r0 + n && c.c >= mg.c && c.c < mg.c + cs;
+        if (!inside) return true;
+        if (c.r === r0 && c.c === mg.c) { anchor = c; return true; }
+        return false;
+      });
+      if (anchor) { anchor.rs = n; anchor.cs = cs; anchor.merged = true; }
     });
     if (el.notesH > 0) {
-      var ntext = M.fill(el.notes, F), tw = cols.length ? el.cols.reduce(function (a, b) { return a + b; }, 0) - 1.6 : 50;
-      var need = M.wrap(ntext, tw, el.notesFs, 'kai').length * el.notesFs * 1.12 + 1.6;
-      rows.push(Math.max(el.notesH, need)); kinds.push('notes');
-      cells.push({ r: rows.length - 1, c: 0, cs: cols.length, text: M.fill(el.notes, F), align: 'left', valign: 'top', fs: el.notesFs });
+      var ntext = M.fill(el.notes, F), tw = cols.length ? el.cols.reduce(function (a, b) { return a + b; }, 0) : 50;
+      rowsF.push(Math.max(el.notesH, needH(ntext, tw, el.notesFs, 'kai', 1.25))); kinds.push('notes');
+      cellsF.push({ r: rowsF.length - 1, c: 0, cs: cols.length, text: ntext, align: 'left', valign: 'top', fs: el.notesFs, lh: 1.25 });
     }
-    return { cols: el.cols, rows: rows, cells: cells, kinds: kinds };
+    return { cols: el.cols, rows: rowsF, cells: cellsF, kinds: kinds, firstData: firstData };
   }
 
   /* 說明項目的定位點：一般為面的內部點；「標號」（不算面積）為點選的位置 */
@@ -529,6 +578,7 @@
     visFeatures(P).forEach(function (f) {
       if (f.label === false) return;
       if (f.labelAt) { res.feat[f.id] = f.labelAt; return; }
+      if (!featAnchor(f)) return;
       res.feat[f.id] = place(featAnchor(f), f.code, (f.labelSize || ST.featureLabel.size) * TSc.feat, f.pt ? null : f.pts);
     });
     if (cad) {
@@ -634,7 +684,9 @@
     // 地上物編號
     visFeatures(P).forEach(function (f) {
       if (f.label === false) return;
-      var lp = LY.feat[f.id] || f.labelAt || featAnchor(f), q = v.toP(lp[0], lp[1]);
+      var lp = LY.feat[f.id] || f.labelAt || featAnchor(f);
+      if (!lp) return;
+      var q = v.toP(lp[0], lp[1]);
       if (f.leader) {
         var ip = featAnchor(f), qi = v.toP(ip[0], ip[1]), dx = qi[0] - q[0], dy = qi[1] - q[1], L = Math.hypot(dx, dy);
         var r0 = (f.labelSize || ST.featureLabel.size) * TSc.feat * 0.6;
