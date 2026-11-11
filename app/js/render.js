@@ -326,8 +326,11 @@
     return { cols: el.cols, rows: rows, cells: cells, kinds: kinds };
   }
 
+  /* 說明項目的定位點：一般為面的內部點；「標號」（不算面積）為點選的位置 */
+  function featAnchor(f) { return f.pt || G.labelPoint(f.pts); }
   function featureArea(f, dec) {
     if (f.areaOverride != null && f.areaOverride !== '') return String(f.areaOverride);
+    if (f.pt || !f.pts || f.pts.length < 3) return '';
     return (G.area(f.pts) + (f.arcAdj || 0)).toFixed(dec == null ? 2 : dec);
   }
 
@@ -436,7 +439,7 @@
   /* 本案範圍：地上物＋本案地號所在地塊（給非本案地號避開用） */
   function caseAreas(P, cad, v) {
     var polys = [];
-    visFeatures(P).forEach(function (f) { polys.push(f.pts); });
+    visFeatures(P).forEach(function (f) { if (f.pts && f.pts.length >= 3) polys.push(f.pts); });
     if (cad) {
       var key = JSON.stringify(P.layerRoles || {}) + '|' + cad.lines.length + '|' + cad.texts.length;
       if (!cad._tgt || cad._tgt.key !== key) {
@@ -496,7 +499,7 @@
       eachPiece(P, cad, function (pc) { addSeg(pc.x1, pc.y1, pc.x2, pc.y2); });
       (P.userLines || []).forEach(function (l) { addSeg(l.x1, l.y1, l.x2, l.y2); });
       visFeatures(P).forEach(function (f) {
-        if (!f.outline) return;
+        if (!f.outline || !f.pts || f.pts.length < 3) return;
         for (var i = 0; i < f.pts.length; i++) { var a = f.pts[i], b = f.pts[(i + 1) % f.pts.length]; addSeg(a[0], a[1], b[0], b[1]); }
       });
     }
@@ -526,7 +529,7 @@
     visFeatures(P).forEach(function (f) {
       if (f.label === false) return;
       if (f.labelAt) { res.feat[f.id] = f.labelAt; return; }
-      res.feat[f.id] = place(G.labelPoint(f.pts), f.code, (f.labelSize || ST.featureLabel.size) * TSc.feat, f.pts);
+      res.feat[f.id] = place(featAnchor(f), f.code, (f.labelSize || ST.featureLabel.size) * TSc.feat, f.pt ? null : f.pts);
     });
     if (cad) {
       var order = [];
@@ -609,7 +612,7 @@
 
     // 地上物外框
     visFeatures(P).forEach(function (f) {
-      if (!f.outline) return;
+      if (!f.outline || !f.pts || f.pts.length < 3) return;
       var d = f.pts.map(function (p, i) { var q = v.toP(p[0], p[1]); return (i ? 'L' : 'M') + n(q[0]) + ' ' + n(q[1]); }).join('') + 'Z';
       var lw = f.lw || ST.caseLine.width;
       s += '<path d="' + d + '" fill="none" stroke="' + (f.color || ST.caseLine.color) + '" stroke-width="' + n(lw) + '" stroke-linejoin="round"' + dashAttr(f.dash, lw) + '/>';
@@ -631,9 +634,9 @@
     // 地上物編號
     visFeatures(P).forEach(function (f) {
       if (f.label === false) return;
-      var lp = LY.feat[f.id] || f.labelAt || G.labelPoint(f.pts), q = v.toP(lp[0], lp[1]);
+      var lp = LY.feat[f.id] || f.labelAt || featAnchor(f), q = v.toP(lp[0], lp[1]);
       if (f.leader) {
-        var ip = G.labelPoint(f.pts), qi = v.toP(ip[0], ip[1]), dx = qi[0] - q[0], dy = qi[1] - q[1], L = Math.hypot(dx, dy);
+        var ip = featAnchor(f), qi = v.toP(ip[0], ip[1]), dx = qi[0] - q[0], dy = qi[1] - q[1], L = Math.hypot(dx, dy);
         var r0 = (f.labelSize || ST.featureLabel.size) * TSc.feat * 0.6;
         if (L > r0 + 0.5) {
           var st = { color: f.labelColor || featColor(P, f), lw: 0.13, dash: 'solid' }, a0 = [q[0] + dx / L * r0, q[1] + dy / L * r0];
@@ -718,7 +721,7 @@
   global.Render = {
     esc: esc, renderSheet: renderSheet, renderElement: renderElement, renderGhost: renderGhost, mapView: mapView,
     tableModel: tableModel, cellRect: cellRect, bounds: bounds, roleOf: roleOf, defaultRole: defaultRole,
-    featureArea: featureArea, fieldsOf: fieldsOf, pieces: pieces, eachPiece: eachPiece, lineStyle: lineStyle, roleStyle: roleStyle,
+    featureArea: featureArea, featAnchor: featAnchor, fieldsOf: fieldsOf, pieces: pieces, eachPiece: eachPiece, lineStyle: lineStyle, roleStyle: roleStyle,
     DASH_LIST: DASH_LIST, textScales: textScales, updateBoth: updateBoth, mergeInfo: mergeInfo, detectMerge: detectMerge, parseParcels: parseParcels, featOv: featOv, visFeatures: visFeatures, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
   };
 })(typeof window !== 'undefined' ? window : globalThis);

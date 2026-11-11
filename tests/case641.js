@@ -13,6 +13,25 @@ const OUT = process.argv[2];
   const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.click('#btnImport')]);
   await fc.setFiles(path.join(__dirname, '..', 'samples', '641', 'plan3_1140822.dxf'));
   await pg.waitForFunction(() => App.cad && App.cad.lines.length > 9000);
+  // 只有分割線的 DXF：匯入後自動切到分割；就算手動切回現況，點選成面也會用分割線
+  const ov0 = await pg.evaluate(() => App.P.activeOv);
+  check('只有分割線 → 自動切換編輯層為分割 (' + ov0 + ')', ov0 === 'split');
+  const a0 = await pg.evaluate(() => {
+    const m = App.P.elements.find(e => e.type === 'map'); m.scale = 2000; App.api.centerMap(m, 'auto');
+    App.P.activeOv = 'case';
+    const t = App.cad.texts.find(t => t.layer === 'PAR_2' && t.text === '641');
+    App.api.addFaceAt(m, [t.x, t.y]); const a = Render.featureArea(App.P.features[0], 2);
+    App.P.features = []; App.P.activeOv = 'split'; return a;
+  });
+  check('編輯層停在現況時點選成面仍用分割線 (' + a0 + ')', a0 === '2117.49');
+  // 標號：只有編號、不算面積
+  await pg.keyboard.press('m');
+  const mk = await pg.evaluate(() => { const m = App.P.elements.find(e => e.type === 'map'); const r = document.getElementById('svg').getBoundingClientRect(); return [r.left + (m.x + m.w * 0.2 - App.view.ox) * App.view.z, r.top + (m.y + m.h * 0.2 - App.view.oy) * App.view.z]; });
+  await pg.mouse.click(mk[0], mk[1]);
+  const mkr = await pg.evaluate(() => { const f = App.P.features[0]; const ft = App.P.elements.find(e => e.type === 'ftable'); const tm = Render.tableModel(ft, App.P); const c = tm.cells.find(c => c.fid === f.id && c.c === 1); const svg = document.querySelector('#content').innerHTML.indexOf('>' + f.code + '<') >= 0; return { code: f.code, pt: !!f.pt, area: c && c.text, svg }; });
+  check('標號 ' + JSON.stringify(mkr), mkr.pt && mkr.code === 'A' && mkr.area === '' && mkr.svg);
+  await pg.evaluate(() => { App.P.features = []; App.api.render(); });
+  await pg.keyboard.press('v');
   const official = { A: 2117.49, B: 2229.36, C: 3713.67, D: 2610.87, E: 3914.43, F1: 1867.13, G: 1572.06, H: 1142.36, I: 1713.54, J: 5711.80, K: 7259.97, L: 1893.86, F2: 573.59, M: 3157.94, N: 702.58, O: 944.29 };
   const res = await pg.evaluate((official) => {
     const P = App.P, m = P.elements.find(e => e.type === 'map');

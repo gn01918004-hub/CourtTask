@@ -49,6 +49,7 @@
 
   /* 標籤位置：面積重心若不在多邊形內，改用格點搜尋離邊界最遠的點 */
   function labelPoint(pts) {
+    if (!pts || !pts.length) return null;
     var c = centroid(pts);
     if (pointInPoly(c, pts) && edgeDist(c, pts) > 0) {
       return c;
@@ -344,7 +345,7 @@
   }
 
   global.Geom = {
-    signedArea: signedArea, area: function (pts) { return Math.abs(signedArea(relative(pts))); },
+    signedArea: signedArea, area: function (pts) { return pts && pts.length >= 3 ? Math.abs(signedArea(relative(pts))) : 0; },
     centroid: centroid, pointInPoly: pointInPoly, distToSeg: distToSeg,
     labelPoint: labelPoint, bbox: bbox, clipSeg: clipSeg, clipPoly: clipPoly,
     segIntersect: segIntersect, buildFaces: buildFaces, faceAt: faceAt, faceUnionAt: faceUnionAt, arcCorrection: arcCorrection, simplify: simplify, median: median

@@ -57,10 +57,10 @@
       if (c) w.line(l.role === 'split' ? 'SPLIT' : 'REF_LINE0', c[0], c[1], c[2], c[3]);
     });
     P.features.forEach(function (f) {
-      var pts = G.clipPoly(f.pts, v.X0, v.Y0, v.X1, v.Y1);
-      if (pts.length < 3) return;
-      w.poly('FEATURE', pts, true);
-      var lp = LY.feat[f.id] || f.labelAt || G.labelPoint(f.pts);
+      var pts = f.pts && f.pts.length >= 3 ? G.clipPoly(f.pts, v.X0, v.Y0, v.X1, v.Y1) : [];
+      if (pts.length >= 3) w.poly('FEATURE', pts, true);
+      var lp = LY.feat[f.id] || f.labelAt || R.featAnchor(f);
+      if (!lp || lp[0] < v.X0 || lp[0] > v.X1 || lp[1] < v.Y0 || lp[1] > v.Y1) return;
       w.text('FEATURE_TXT', lp[0], lp[1], 2.5, f.code, { center: true });
     });
     P.annos.forEach(function (a) {
