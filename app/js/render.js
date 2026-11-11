@@ -27,7 +27,8 @@
     }
     if (/REF_LINE|^KC|CASE|^0$/.test(u)) return 'case';
     if (/SPLIT|分割/.test(u)) return 'split';
-    if (/^LIN|^MERGE$/.test(u)) return 'parcel';
+    if (/^MERGE$|^MERGEPAR2$/.test(u)) return 'hide';        // 內網合併的 X 記號：由本系統自行繪製
+    if (/^LIN|^MERGESRC$/.test(u)) return 'parcel';          // MERGESRC = 被合併的原地號界線
     return 'other';
   }
   var ROLE_STYLE = { parcel: 'parcelLine', case: 'caseLine', split: 'splitLine', other: 'otherLine' };
@@ -81,21 +82,170 @@
     return out;
   }
   /* 逐段走訪所有可見的圖資線段 */
-  function eachPiece(P, cad, fn) {
+  /* 逐段走訪圖資線段。opts.all：含隱藏圖層；opts.keepMerged：保留假合併中被隱藏的界線 */
+  function eachPiece(P, cad, fn, opts) {
     if (!cad) return;
+    opts = opts || {};
+    var mi = opts.keepMerged ? null : mergeInfo(P, cad), hideInternal = mi && P.merge && P.merge.mode === 'hide';
     cad.lines.forEach(function (l, idx) {
-      var role = roleOf(P, l.layer, 'line');
-      if (role === 'hide') return;
+      var base = roleOf(P, l.layer, 'line', l.color);
       pieces(P, l, idx).forEach(function (pc) {
-        var ss = P.segStyle[pc.key];
-        if (ss && ss.hidden) return;
+        var ss = P.segStyle[pc.key], role = (ss && ss.role) || base;
+        if (!opts.all) {
+          if (role === 'hide' || (ss && ss.hidden)) return;
+          if (P.ovs && P.ovs[role] && P.ovs[role].visible === false) return;
+          if (hideInternal && mi.internal[pc.key]) return;
+        }
         fn(pc, role, ss, l);
       });
     });
   }
-  function roleOf(P, layer, kind) {
-    var r = P.layerRoles[kind + ':' + layer];
+  function roleOf(P, layer, kind, color) {
+    var r = (color != null && P.layerRoles[kind + ':' + layer + '|' + color]) || P.layerRoles[kind + ':' + layer];
     return r || defaultRole(layer, kind);
+  }
+
+  /* ---------- 假合併 ----------
+     P.merge = { parcels: '641、643、646', mode: 'x' | 'hide' | 'off', xSize: 3 }
+     找出所列地號彼此之間的共用界線：mode x = 保留並在線上打 X；hide = 不顯示。
+     點選成面時一律不把這些界線當邊界。 */
+  function parseParcels(str) {
+    return String(str || '').split(/[、,，;；\s]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+  var EMPTY_MERGE = { internal: {}, marks: [], parcels: [], missing: [] };
+  function mergeInfo(P, cad) {
+    var mg = P.merge;
+    if (!cad || !mg || mg.mode === 'off') return EMPTY_MERGE;
+    var list = parseParcels(mg.parcels);
+    var hasSrc = cad.lines.some(function (l) { return /MERGESRC/i.test(l.layer); });
+    if (list.length < 2 && !hasSrc) return EMPTY_MERGE;
+    var key = list.join(',') + '|' + JSON.stringify(P.splits || {}) + '|' + JSON.stringify(P.layerRoles || {}) + '|' + cad.lines.length;
+    if (cad._merge && cad._merge.key === key) return cad._merge.res;
+    var labels = {};
+    cad.texts.forEach(function (t) {
+      var tx = String(t.text).trim();
+      if (list.indexOf(tx) >= 0 && !labels[tx]) labels[tx] = [t.x, t.y];
+    });
+    var pts = Object.keys(labels).map(function (k) { return labels[k]; });
+    var res = { internal: {}, marks: [], parcels: Object.keys(labels), missing: list.filter(function (no) { return !labels[no]; }) };
+    var inner = [];
+    // 內網合併輸出的 MERGESRC 圖層本身就是被合併的原界線
+    eachPiece(P, cad, function (pc, role, ss, l) {
+      if (/MERGESRC/i.test(l.layer)) { res.internal[pc.key] = 1; inner.push(pc); }
+    }, { keepMerged: true });
+    if (pts.length >= 2) {
+      var bb = G.bbox(pts), M_ = 400;
+      bb = [bb[0] - M_, bb[1] - M_, bb[2] + M_, bb[3] + M_];
+      var pcs = [];
+      eachPiece(P, cad, function (pc, role) {
+        if (role !== 'parcel') return;
+        if (Math.max(pc.x1, pc.x2) < bb[0] || Math.min(pc.x1, pc.x2) > bb[2] || Math.max(pc.y1, pc.y2) < bb[1] || Math.min(pc.y1, pc.y2) > bb[3]) return;
+        pcs.push(pc);
+      }, { keepMerged: true });
+      var faces = G.buildFaces(pcs.map(function (p) { return [p.x1, p.y1, p.x2, p.y2]; }), 0.002), polys = [];
+      Object.keys(labels).forEach(function (no) {
+        var best = null, ba = Infinity;
+        faces.forEach(function (f) { if (G.pointInPoly(labels[no], f)) { var a = G.area(f); if (a < ba) { ba = a; best = f; } } });
+        if (best) polys.push({ no: no, poly: best, bb: G.bbox(best), area: ba });
+      });
+      polys.sort(function (a, b) { return a.area - b.area; }); // 有洞的大面會包住小面，取最小者
+      var which = function (p) {
+        for (var i = 0; i < polys.length; i++) {
+          var b = polys[i].bb;
+          if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) continue;
+          if (G.pointInPoly(p, polys[i].poly)) return polys[i].no;
+        }
+        return null;
+      };
+      pcs.forEach(function (pc) {
+        if (res.internal[pc.key]) return;
+        var dx = pc.x2 - pc.x1, dy = pc.y2 - pc.y1, L = Math.hypot(dx, dy); if (L < 0.01) return;
+        var mx = (pc.x1 + pc.x2) / 2, my = (pc.y1 + pc.y2) / 2, nx = -dy / L * 0.05, ny = dx / L * 0.05;
+        var a = which([mx + nx, my + ny]), b = which([mx - nx, my - ny]);
+        if (a && b && a !== b) { res.internal[pc.key] = 1; inner.push(pc); }
+      });
+    }
+    {
+      // 相連的界線分成一組，在較長的線段中點打 X
+      var node = {}, comp = [], seen = {};
+      var k = function (x, y) { return Math.round(x * 1000) + ',' + Math.round(y * 1000); };
+      inner.forEach(function (pc, i) { [k(pc.x1, pc.y1), k(pc.x2, pc.y2)].forEach(function (q) { (node[q] = node[q] || []).push(i); }); });
+      inner.forEach(function (pc, i) {
+        if (seen[i]) return;
+        var stack = [i], group = []; seen[i] = 1;
+        while (stack.length) {
+          var j = stack.pop(), p = inner[j]; group.push(p);
+          [k(p.x1, p.y1), k(p.x2, p.y2)].forEach(function (q) { node[q].forEach(function (m) { if (!seen[m]) { seen[m] = 1; stack.push(m); } }); });
+        }
+        comp.push(group);
+      });
+      var len = function (p) { return Math.hypot(p.x2 - p.x1, p.y2 - p.y1); };
+      comp.forEach(function (g) {
+        var longest = Math.max.apply(null, g.map(len));
+        g.forEach(function (p) {
+          if (len(p) < longest * 0.5) return;
+          res.marks.push({ x: (p.x1 + p.x2) / 2, y: (p.y1 + p.y2) / 2, ang: Math.atan2(p.y2 - p.y1, p.x2 - p.x1) });
+        });
+      });
+    }
+    cad._merge = { key: key, res: res };
+    return res;
+  }
+
+  /* 從 DXF 中的 X 記號（兩條短線交叉）推測合併的地號：X 所在界線兩側封閉區內的地號 */
+  function detectMerge(P, cad) {
+    if (!cad) return [];
+    var shorts = [], grid = {};
+    // X 記號優先找 MERGE 類圖層；沒有的話找非地籍線圖層（地籍圖本身也有交叉小符號）
+    var hasMergeLayer = cad.lines.some(function (l) { return /MERGE$/i.test(l.layer); });
+    cad.lines.forEach(function (l) {
+      if (hasMergeLayer ? !/MERGE$/i.test(l.layer) : roleOf(P, l.layer, 'line', l.color) === 'parcel') return;
+      var L = Math.hypot(l.x2 - l.x1, l.y2 - l.y1);
+      if (L < 0.3 || L > 8) return;
+      var mx = (l.x1 + l.x2) / 2, my = (l.y1 + l.y2) / 2, key = Math.round(mx) + ',' + Math.round(my);
+      shorts.push({ l: l, mx: mx, my: my, L: L });
+      (grid[key] = grid[key] || []).push(shorts.length - 1);
+    });
+    var centers = [];
+    shorts.forEach(function (a, i) {
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+        (grid[(Math.round(a.mx) + dx) + ',' + (Math.round(a.my) + dy)] || []).forEach(function (j) {
+          if (j <= i) return;
+          var b = shorts[j];
+          if (Math.hypot(a.mx - b.mx, a.my - b.my) > 0.05 * Math.min(a.L, b.L) || Math.abs(a.L - b.L) > 0.2 * a.L) return;
+          var r = G.segIntersect([a.l.x1, a.l.y1], [a.l.x2, a.l.y2], [b.l.x1, b.l.y1], [b.l.x2, b.l.y2]);
+          if (r && Math.abs(r.t - 0.5) < 0.1 && Math.abs(r.u - 0.5) < 0.1) centers.push([a.mx, a.my]);
+        });
+      }
+    });
+    if (!centers.length) return [];
+    var found = [];
+    centers.forEach(function (c) {
+      var bb = [c[0] - 300, c[1] - 300, c[0] + 300, c[1] + 300], segs = [], near = null, nd = 3;
+      eachPiece(P, cad, function (pc, role) {
+        if (role !== 'parcel') return;
+        var cs = G.clipSeg(pc.x1, pc.y1, pc.x2, pc.y2, bb[0], bb[1], bb[2], bb[3]); if (!cs) return;
+        segs.push(cs);
+        var d = G.distToSeg(c, [pc.x1, pc.y1], [pc.x2, pc.y2]);
+        if (d < nd) { nd = d; near = pc; }
+      }, { keepMerged: true });
+      if (!near) return;
+      var faces = G.buildFaces(segs, 0.002);
+      var dx = near.x2 - near.x1, dy = near.y2 - near.y1, L = Math.hypot(dx, dy);
+      var foot = [c[0], c[1]];
+      [1, -1].forEach(function (sg) {
+        var p = [foot[0] - dy / L * 0.3 * sg, foot[1] + dx / L * 0.3 * sg], best = null, ba = Infinity;
+        faces.forEach(function (f) { if (G.pointInPoly(p, f)) { var a = G.area(f); if (a < ba) { ba = a; best = f; } } });
+        if (!best) return;
+        var cands = cad.texts.filter(function (t) {
+          var role = roleOf(P, t.layer, 'text');
+          return (role === 'parcelNo' || role === 'target') && !/\(\d+\)$/.test(t.text) && G.pointInPoly([t.x, t.y], best);
+        });
+        cands.sort(function (a, b) { return (roleOf(P, b.layer, 'text') === 'target') - (roleOf(P, a.layer, 'text') === 'target'); });
+        if (cands[0] && found.indexOf(String(cands[0].text).trim()) < 0) found.push(String(cands[0].text).trim());
+      });
+    });
+    return found;
   }
 
   /* ---------- 地圖座標轉換 ---------- */
@@ -123,6 +273,7 @@
     // 地上物說明表
     var feats = P.features.filter(function (f) {
       if (f.hideInTable) return false;
+      if (el.ov && featOv(f) !== el.ov) return false;
       if (el.landFilter) return String(f.landNo) === String(el.landFilter);
       return true;
     });
@@ -242,6 +393,10 @@
   }
 
   function dashOf(style, lw) { return dashAttr(style, lw); }
+  function featOv(f) { return f.ov || 'case'; }
+  function featVisible(P, f) { return !(P.ovs && P.ovs[featOv(f)] && P.ovs[featOv(f)].visible === false); }
+  function featColor(P, f) { return P.styles.featureLabelByLayer === false ? P.styles.featureLabel.color : roleStyle(P, featOv(f)).color; }
+  function visFeatures(P) { return P.features.filter(function (f) { return featVisible(P, f); }); }
 
   /* ---------- 標籤自動避開線條 ---------- */
   function boxHits(box, segs, boxes) {
@@ -266,7 +421,7 @@
     if (auto) {
       eachPiece(P, cad, function (pc) { addSeg(pc.x1, pc.y1, pc.x2, pc.y2); });
       (P.userLines || []).forEach(function (l) { addSeg(l.x1, l.y1, l.x2, l.y2); });
-      P.features.forEach(function (f) {
+      visFeatures(P).forEach(function (f) {
         if (!f.outline) return;
         for (var i = 0; i < f.pts.length; i++) { var a = f.pts[i], b = f.pts[(i + 1) % f.pts.length]; addSeg(a[0], a[1], b[0], b[1]); }
       });
@@ -292,7 +447,7 @@
       return best;
     }
     // 地上物編號
-    P.features.forEach(function (f) {
+    visFeatures(P).forEach(function (f) {
       if (f.label === false) return;
       if (f.labelAt) { res.feat[f.id] = f.labelAt; return; }
       res.feat[f.id] = place(G.labelPoint(f.pts), f.code, (f.labelSize || ST.featureLabel.size) * TS, f.pts);
@@ -336,7 +491,7 @@
     s += '<g clip-path="url(#' + clipId + ')">';
 
     // 地上物填色（在線之下）
-    P.features.forEach(function (f) {
+    visFeatures(P).forEach(function (f) {
       if (!f.fill) return;
       var d = f.pts.map(function (p, i) { var q = v.toP(p[0], p[1]); return (i ? 'L' : 'M') + n(q[0]) + ' ' + n(q[1]); }).join('') + 'Z';
       s += '<path d="' + d + '" fill="' + f.fill + '" fill-opacity="' + (f.fillOpacity == null ? 0.25 : f.fillOpacity) + '" stroke="none"/>';
@@ -356,6 +511,18 @@
       s += '<path d="' + groups[r] + '" fill="none" stroke="' + st.color + '" stroke-width="' + n(st.lw) + '" stroke-linecap="round"' + dashAttr(st.dash, st.lw) + '/>';
     });
     s += special;
+    var MI = mergeInfo(P, cad);
+    if (P.merge && P.merge.mode === 'x' && MI.marks.length) {
+      var xs = P.merge.xSize || 3, pst = lineStyle(P, 'parcel', null), xl = { color: pst.color, lw: Math.max(pst.lw, 0.18), dash: 'solid' };
+      MI.marks.forEach(function (mk) {
+        if (mk.x < v.X0 || mk.x > v.X1 || mk.y < v.Y0 || mk.y > v.Y1) return;
+        var q = v.toP(mk.x, mk.y), a = -mk.ang;
+        [Math.PI / 4, -Math.PI / 4].forEach(function (d) {
+          var c = Math.cos(a + d) * xs / 2, sn = Math.sin(a + d) * xs / 2;
+          s += lineSVG([q[0] - c, q[1] - sn], [q[0] + c, q[1] + sn], xl);
+        });
+      });
+    }
     (P.userLines || []).forEach(function (l) {
       var c = G.clipSeg(l.x1, l.y1, l.x2, l.y2, v.X0, v.Y0, v.X1, v.Y1);
       if (!c) return;
@@ -365,7 +532,7 @@
     });
 
     // 地上物外框
-    P.features.forEach(function (f) {
+    visFeatures(P).forEach(function (f) {
       if (!f.outline) return;
       var d = f.pts.map(function (p, i) { var q = v.toP(p[0], p[1]); return (i ? 'L' : 'M') + n(q[0]) + ' ' + n(q[1]); }).join('') + 'Z';
       var lw = f.lw || ST.caseLine.width;
@@ -386,18 +553,18 @@
       });
     }
     // 地上物編號
-    P.features.forEach(function (f) {
+    visFeatures(P).forEach(function (f) {
       if (f.label === false) return;
       var lp = LY.feat[f.id] || f.labelAt || G.labelPoint(f.pts), q = v.toP(lp[0], lp[1]);
       if (f.leader) {
         var ip = G.labelPoint(f.pts), qi = v.toP(ip[0], ip[1]), dx = qi[0] - q[0], dy = qi[1] - q[1], L = Math.hypot(dx, dy);
         var r0 = (f.labelSize || ST.featureLabel.size) * TS * 0.6;
         if (L > r0 + 0.5) {
-          var st = { color: f.labelColor || ST.featureLabel.color, lw: 0.13, dash: 'solid' }, a0 = [q[0] + dx / L * r0, q[1] + dy / L * r0];
+          var st = { color: f.labelColor || featColor(P, f), lw: 0.13, dash: 'solid' }, a0 = [q[0] + dx / L * r0, q[1] + dy / L * r0];
           s += lineSVG(a0, qi, st) + arrowHead(a0, qi, 0.15, st.color);
         }
       }
-      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((f.labelSize || ST.featureLabel.size) * TS) + '" fill="' + (f.labelColor || ST.featureLabel.color) +
+      s += '<text x="' + n(q[0]) + '" y="' + n(q[1]) + '" font-size="' + n((f.labelSize || ST.featureLabel.size) * TS) + '" fill="' + (f.labelColor || featColor(P, f)) +
         '" text-anchor="middle" dominant-baseline="central" font-family="' + esc(font) + '">' + esc(f.code) + '</text>';
     });
     // 圖面註記
@@ -475,6 +642,6 @@
     esc: esc, renderSheet: renderSheet, renderElement: renderElement, renderGhost: renderGhost, mapView: mapView,
     tableModel: tableModel, cellRect: cellRect, bounds: bounds, roleOf: roleOf, defaultRole: defaultRole,
     featureArea: featureArea, fieldsOf: fieldsOf, pieces: pieces, eachPiece: eachPiece, lineStyle: lineStyle, roleStyle: roleStyle,
-    DASH_LIST: DASH_LIST, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
+    DASH_LIST: DASH_LIST, mergeInfo: mergeInfo, detectMerge: detectMerge, parseParcels: parseParcels, featOv: featOv, visFeatures: visFeatures, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -25,7 +25,8 @@
     var raw = text.replace(/\r/g, '').split('\n');
     var pairs = [];
     for (var i = 0; i + 1 < raw.length; i += 2) pairs.push([parseInt(raw[i], 10), raw[i + 1]]);
-    var out = { lines: [], texts: [], layers: {}, arcs: [] };
+    var out = { lines: [], texts: [], layers: {}, arcs: [], layerColors: {} };
+    var tblLayer = null;
     var section = null, ent = null, poly = null;
 
     function addLayer(l) { out.layers[l] = (out.layers[l] || 0) + 1; }
@@ -33,17 +34,21 @@
       if (!ent) return;
       var e = ent; ent = null;
       var L = e.layer || '0';
+      // 顏色：實體顏色(62)，BYLAYER(256)/未設定時用圖層顏色
+      var col = e[62];
+      if (col == null || col === 256 || col === 0) col = out.layerColors[L];
+      if (col != null) col = Math.abs(col);
       switch (e.type) {
         case 'LINE':
-          out.lines.push({ layer: L, x1: e[10], y1: e[20], x2: e[11], y2: e[21] }); addLayer(L); break;
+          out.lines.push({ layer: L, x1: e[10], y1: e[20], x2: e[11], y2: e[21], color: col }); addLayer(L); break;
         case 'LWPOLYLINE':
-          pushPoly(L, e.pts, (e[70] & 1) === 1); break;
+          pushPoly(L, e.pts, (e[70] & 1) === 1, col); break;
         case 'POLYLINE':
-          poly = { layer: L, pts: [], closed: (e[70] & 1) === 1 }; break;
+          poly = { layer: L, pts: [], closed: (e[70] & 1) === 1, color: col }; break;
         case 'VERTEX':
           if (poly) poly.pts.push([e[10], e[20]]); break;
         case 'SEQEND':
-          if (poly) pushPoly(poly.layer, poly.pts, poly.closed); poly = null; break;
+          if (poly) pushPoly(poly.layer, poly.pts, poly.closed, poly.color); poly = null; break;
         case 'TEXT': case 'MTEXT': case 'ATTRIB': {
           var useAlign = e.type === 'TEXT' && ((e[72] || 0) !== 0 || (e[73] || 0) !== 0) && e[11] !== undefined;
           var t = e.type === 'MTEXT' ? stripMtext((e.t3 || '') + (e[1] || '')) : unescapeText(e[1] || '');
@@ -66,21 +71,29 @@
           }
           var stepDeg = (a1 - a0) / steps;
           out.arcs.push({ cx: cx, cy: cy, r: r, a0: a0, a1: a1, chord: 2 * r * Math.sin(stepDeg * Math.PI / 360) });
-          pushPoly(L, pts, false); break;
+          pushPoly(L, pts, false, col); break;
         }
       }
     }
-    function pushPoly(L, pts, closed) {
+    function pushPoly(L, pts, closed, col) {
       if (!pts || pts.length < 2) return;
       for (var k = 0; k + 1 < pts.length; k++)
-        out.lines.push({ layer: L, x1: pts[k][0], y1: pts[k][1], x2: pts[k + 1][0], y2: pts[k + 1][1] });
+        out.lines.push({ layer: L, x1: pts[k][0], y1: pts[k][1], x2: pts[k + 1][0], y2: pts[k + 1][1], color: col });
       if (closed && pts.length > 2)
-        out.lines.push({ layer: L, x1: pts[pts.length - 1][0], y1: pts[pts.length - 1][1], x2: pts[0][0], y2: pts[0][1] });
+        out.lines.push({ layer: L, x1: pts[pts.length - 1][0], y1: pts[pts.length - 1][1], x2: pts[0][0], y2: pts[0][1], color: col });
       addLayer(L);
     }
 
     for (i = 0; i < pairs.length; i++) {
       var c = pairs[i][0], v = pairs[i][1], vt = v.trim();
+      if (section === 'TABLES') {
+        if (c === 0) { tblLayer = vt === 'LAYER' ? {} : null; continue; }
+        if (tblLayer) {
+          if (c === 2) tblLayer.name = vt;
+          if (c === 62 && tblLayer.name != null) out.layerColors[tblLayer.name] = Math.abs(parseInt(vt, 10));
+        }
+        if (!(c === 0)) continue;
+      }
       if (c === 0) {
         flush();
         if (vt === 'SECTION') { section = (pairs[i + 1] && pairs[i + 1][1].trim()) || null; i++; continue; }
@@ -97,7 +110,7 @@
       else if (c === 3) ent.t3 = (ent.t3 || '') + v;
       else if (ent.type === 'LWPOLYLINE' && c === 10) ent.pts.push([parseFloat(v), 0]);
       else if (ent.type === 'LWPOLYLINE' && c === 20) { if (ent.pts.length) ent.pts[ent.pts.length - 1][1] = parseFloat(v); }
-      else if ((c >= 10 && c <= 59) || (c >= 70 && c <= 79)) ent[c] = parseFloat(v);
+      else if ((c >= 10 && c <= 59) || (c >= 70 && c <= 79) || c === 62) ent[c] = parseFloat(v);
     }
     flush();
     return out;
@@ -137,5 +150,20 @@
   };
   Writer.prototype.toString = function () { return this.buf.concat(['0', 'ENDSEC', '0', 'EOF']).join('\r\n') + '\r\n'; };
 
-  global.DXF = { decodeBytes: decodeBytes, parse: parse, Writer: Writer, esc: esc };
+  /* AutoCAD 色號 → RGB（常用色；其他色號以色相近似） */
+  var ACI = { 1: '#ff0000', 2: '#ffff00', 3: '#00ff00', 4: '#00ffff', 5: '#0000ff', 6: '#ff00ff', 7: '#000000', 8: '#808080', 9: '#c0c0c0', 250: '#333333', 251: '#505050', 252: '#696969', 253: '#828282', 254: '#bebebe', 255: '#ffffff' };
+  var ACI_NAME = { 1: '紅', 2: '黃', 3: '綠', 4: '青', 5: '藍', 6: '洋紅', 7: '黑/白', 8: '深灰', 9: '淺灰' };
+  function aciHex(c) {
+    if (c == null) return null;
+    if (ACI[c]) return ACI[c];
+    if (c >= 10 && c <= 249) {
+      var hue = Math.floor((c - 10) / 10) * 15, lv = [1, 0.75, 0.6, 0.45, 0.3][Math.floor((c % 10) / 2)] || 0.6;
+      var f = function (n) { var k = (n + hue / 30) % 12; return Math.round(255 * lv * (1 - Math.max(Math.min(k - 3, 9 - k, 1), -1)) * 0.5 + 255 * lv * 0.5); };
+      return '#' + [f(0), f(8), f(4)].map(function (x) { return ('0' + Math.max(0, Math.min(255, x)).toString(16)).slice(-2); }).join('');
+    }
+    return '#000000';
+  }
+  function aciName(c) { return c == null ? '' : (ACI_NAME[c] || '色號' + c); }
+
+  global.DXF = { aciHex: aciHex, aciName: aciName, decodeBytes: decodeBytes, parse: parse, Writer: Writer, esc: esc };
 })(typeof window !== 'undefined' ? window : globalThis);

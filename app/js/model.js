@@ -123,6 +123,9 @@
       output: { k8: { w: 267, h: 388, offX: 20, offY: 20, dx: 0, dy: 0, region: null } },
       settings: { snapEdges: true, faceWithParcel: true, codeScheme: 'alpha' },
       splits: {},
+      ovs: { case: { name: '現況', visible: true, codeScheme: 'alpha' }, split: { name: '分割', visible: true, codeScheme: 'alpha' } },
+      activeOv: 'case',
+      merge: { parcels: '', mode: 'x', xSize: 3 },
       plans: [{ name: '方案1', data: null }], planIdx: 0
     };
     if (tpl) {
@@ -183,7 +186,7 @@
     return '?';
   }
   /* 方案（同一案件的不同分割方案）各自保有的資料 */
-  var PLAN_KEYS = ['elements', 'features', 'annos', 'userLines', 'segStyle', 'splits', 'textOver', 'layerRoles', 'output'];
+  var PLAN_KEYS = ['elements', 'features', 'annos', 'userLines', 'segStyle', 'splits', 'textOver', 'layerRoles', 'output', 'ovs', 'activeOv', 'merge'];
 
   global.Model = {
     FIELDS: FIELDS, KAI: KAI, SANS: SANS, uid: uid, newProject: newProject, defaultElements: defaultElements,

@@ -95,7 +95,7 @@
     function L(n) { if (li[n] == null) { li[n] = layers.length; layers.push(n); } return li[n]; }
     return {
       name: cad.name, layers: layers,
-      lines: cad.lines.map(function (l) { return [L(l.layer), l.x1, l.y1, l.x2, l.y2]; }),
+      lines: cad.lines.map(function (l) { return l.color != null ? [L(l.layer), l.x1, l.y1, l.x2, l.y2, l.color] : [L(l.layer), l.x1, l.y1, l.x2, l.y2]; }),
       texts: cad.texts.map(function (t) { return [L(t.layer), t.x, t.y, t.h, t.rot, t.text, t.h72, t.v73]; }),
       arcs: cad.arcs || []
     };
@@ -104,7 +104,7 @@
     if (!c) return null;
     return {
       name: c.name,
-      lines: c.lines.map(function (a) { return { layer: c.layers[a[0]], x1: a[1], y1: a[2], x2: a[3], y2: a[4] }; }),
+      lines: c.lines.map(function (a) { return { layer: c.layers[a[0]], x1: a[1], y1: a[2], x2: a[3], y2: a[4], color: a[5] }; }),
       texts: c.texts.map(function (a) { return { layer: c.layers[a[0]], x: a[1], y: a[2], h: a[3], rot: a[4], text: a[5], h72: a[6], v73: a[7] }; }),
       arcs: c.arcs || []
     };
@@ -136,6 +136,8 @@
     P.userLines = P.userLines || []; P.annos = P.annos || []; P.features = P.features || [];
     P.segStyle = P.segStyle || {}; P.textOver = P.textOver || {}; P.layerRoles = P.layerRoles || {}; P.splits = P.splits || {};
     if (!P.plans || !P.plans.length) { P.plans = [{ name: '方案1', data: null }]; P.planIdx = 0; }
+    P.ovs = P.ovs || clone(base.ovs); P.activeOv = P.activeOv || 'case'; P.merge = P.merge || clone(base.merge);
+    if (P.settings.codeScheme && !P.ovs.case._mig) { P.ovs.case.codeScheme = P.ovs.case.codeScheme || P.settings.codeScheme; }
     ['parcelLine', 'caseLine', 'splitLine', 'otherLine'].forEach(function (k) { P.styles[k] = Object.assign({}, base.styles[k], P.styles[k] || {}); });
     P.elements.forEach(function (e) {
       if (e.type === 'ftable' && !e.columns) {
@@ -222,6 +224,10 @@
             cad.name = (cad.name ? cad.name + ' + ' : '') + it.name;
           });
           App.cad = cad; App.planCads[App.P.planIdx] = cad;
+          if (!R.parseParcels(App.P.merge.parcels).length) {
+            var det = R.detectMerge(App.P, App.cad);
+            if (det.length >= 2) { App.P.merge.parcels = det.join('、'); App.P.merge.mode = App.P.merge.mode || 'x'; toast('偵測到合併記號：' + det.join('、') + '（可在「圖層」頁修改）', 5000); }
+          }
           var tgt = App.cad.texts.filter(function (t) { return R.roleOf(App.P, t.layer, 'text') === 'target'; })[0];
           if (tgt && !App.P.fields.landNo) App.P.fields.landNo = tgt.text;
           maps().forEach(function (m) { if (m.cx == null || replace) centerMap(m, 'auto'); });
@@ -571,8 +577,9 @@
       setTool('select'); changed(); setTimeout(function () { var ta = $('#props textarea'); if (ta) { ta.focus(); ta.select(); } }, 30);
       return;
     }
-    if (tool === 'region') {
-      drag = { type: 'region', sx: p[0], sy: p[1] }; App.rubber = { x: p[0], y: p[1], w: 0, h: 0 }; return;
+    if (tool === 'region' || tool === 'lsel') {
+      if (tool === 'lsel' && !mapAt(p)) return toast('請在略圖框內拖曳');
+      drag = { type: tool === 'lsel' ? 'lsel' : 'region', sx: p[0], sy: p[1], m: mapAt(p) }; App.rubber = { x: p[0], y: p[1], w: 0, h: 0 }; return;
     }
     if (tool === 'pan') {
       m = mapAt(p); if (!m) return;
@@ -657,7 +664,7 @@
       case 'view':
         App.view.ox = drag.ox - (ev.clientX - drag.sx) / App.view.z;
         App.view.oy = drag.oy - (ev.clientY - drag.sy) / App.view.z; applyView(); return;
-      case 'region':
+      case 'region': case 'lsel':
         App.rubber = { x: Math.min(drag.sx, p[0]), y: Math.min(drag.sy, p[1]), w: Math.abs(p[0] - drag.sx), h: Math.abs(p[1] - drag.sy) }; break;
       case 'pan': {
         var k = 1000 / drag.m.scale;
@@ -691,7 +698,10 @@
   function onUp(ev) {
     if (!drag) return;
     var d = drag; drag = null; App.guides = []; App.snapPt = null;
-    if (d.type === 'region') {
+    if (d.type === 'lsel') {
+      var rr = App.rubber; App.rubber = null;
+      if (rr && rr.w > 1 && rr.h > 1) windowSelect(d.m, rr);
+    } else if (d.type === 'region') {
       var r = App.rubber; App.rubber = null;
       if (r && r.w > 2 && r.h > 2) {
         App.P.output.k8.region = { x: round(r.x, 2), y: round(r.y, 2), w: round(r.w, 2), h: round(r.h, 2) };
@@ -785,14 +795,21 @@
   }
 
   /* ================= 地上物 ================= */
+  function ovFeatures(ov) { ov = ov || App.P.activeOv || 'case'; return App.P.features.filter(function (f) { return (f.ov || 'case') === ov; }); }
+  function ovScheme(ov) { var o = App.P.ovs[ov || App.P.activeOv] || {}; return o.codeScheme || 'alpha'; }
+  function nextCodeOv() { return M.nextCode(ovFeatures(), ovScheme()); }
   function arcAdj(pts) { return App.cad ? round(G.arcCorrection(pts, App.cad.arcs), 6) : 0; }
   function faceSegs(m, pts) {
     var P = App.P, segs = [], R2 = Math.max(m.w, m.h) * m.scale / 1000, bx = G.bbox(pts);
     bx = [bx[0] - R2, bx[1] - R2, bx[2] + R2, bx[3] + R2];
     function add(x1, y1, x2, y2) { var c = G.clipSeg(x1, y1, x2, y2, bx[0], bx[1], bx[2], bx[3]); if (c) segs.push(c); }
-    var roles = P.settings.faceRoles || { parcel: true, case: true, split: true, other: false };
-    R.eachPiece(P, App.cad, function (pc, role) { if (roles[role]) add(pc.x1, pc.y1, pc.x2, pc.y2); });
-    P.userLines.forEach(function (l) { if (roles[l.role || 'case']) add(l.x1, l.y1, l.x2, l.y2); });
+    var roles = P.settings.faceRoles || { parcel: true, other: false }, ov = P.activeOv || 'case';
+    var MI = R.mergeInfo(P, App.cad);
+    R.eachPiece(P, App.cad, function (pc, role) {
+      if (MI.internal[pc.key]) return;                 // 假合併的界線不當邊界
+      if (role === ov || (role === 'parcel' && roles.parcel !== false) || (role === 'other' && roles.other)) add(pc.x1, pc.y1, pc.x2, pc.y2);
+    }, { keepMerged: true });
+    P.userLines.forEach(function (l) { if ((l.role || 'case') === ov) add(l.x1, l.y1, l.x2, l.y2); });
     return segs;
   }
   function addFaceAt(m, w, merge) {
@@ -814,7 +831,7 @@
     var dup = P.features.filter(function (f) { return Math.abs(G.area(f.pts) - a) < 0.005 && G.pointInPoly(w, f.pts); })[0];
     if (dup) { select({ kind: 'feature', id: dup.id, mapId: m.id }); return toast('此區域已是地上物 ' + dup.code); }
     var f = {
-      id: M.uid(), code: M.nextCode(P.features, P.settings.codeScheme), pts: face.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }),
+      id: M.uid(), ov: P.activeOv || 'case', code: nextCodeOv(), pts: face.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }),
       landNo: P.fields.landNo || '', note: '', outline: false, dash: false, label: true, seeds: [w]
     };
     f.arcAdj = arcAdj(f.pts);
@@ -826,7 +843,7 @@
     var P = App.P;
     if (d.type === 'poly') {
       if (d.pts.length >= 3) {
-        var f = { id: M.uid(), code: M.nextCode(P.features, P.settings.codeScheme), pts: d.pts.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }), landNo: P.fields.landNo || '', note: '', outline: true, dash: false, label: true };
+        var f = { id: M.uid(), ov: P.activeOv || 'case', code: nextCodeOv(), pts: d.pts.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }), landNo: P.fields.landNo || '', note: '', outline: true, dash: false, label: true };
         f.arcAdj = arcAdj(f.pts);
         P.features.push(f); App.draw = null; select({ kind: 'feature', id: f.id, mapId: d.mapId }); changed();
         toast('新增地上物 ' + f.code + '：' + G.area(f.pts).toFixed(2) + ' m²');
@@ -884,6 +901,37 @@
       select({ kind: 'seg', idx: keys.slice(-1), mapId: m.id });
     }
     changed(); toast('已斷線，可分別設定兩段的線型');
+  }
+  /* 從已選線段往外找端點相接、歸屬相同的線段（同一張 DXF 分開現況/分割時好用） */
+  function connectedPieces(keys) {
+    var P = App.P, all = {}, node = {}, roleOf = {};
+    var k = function (x, y) { return Math.round(x * 500) + ',' + Math.round(y * 500); };
+    R.eachPiece(P, App.cad, function (pc, role) {
+      all[pc.key] = pc; roleOf[pc.key] = role;
+      [k(pc.x1, pc.y1), k(pc.x2, pc.y2)].forEach(function (q) { (node[q] = node[q] || []).push(pc.key); });
+    });
+    var want = {}, out = [], stack = keys.slice();
+    keys.forEach(function (x) { want[roleOf[x]] = 1; });
+    var seen = {}; keys.forEach(function (x) { seen[x] = 1; });
+    while (stack.length) {
+      var key = stack.pop(), pc = all[key]; if (!pc) continue;
+      out.push(key);
+      [k(pc.x1, pc.y1), k(pc.x2, pc.y2)].forEach(function (q) {
+        (node[q] || []).forEach(function (o) { if (!seen[o] && want[roleOf[o]]) { seen[o] = 1; stack.push(o); } });
+      });
+    }
+    toast('已選取 ' + out.length + ' 段相連線段');
+    return out;
+  }
+  function windowSelect(m, r) {
+    var v = R.mapView(m), a = v.toW(r.x, r.y + r.h), b = v.toW(r.x + r.w, r.y), out = [];
+    R.eachPiece(App.P, App.cad, function (pc, role) {
+      if (role === 'parcel' && !App.P.settings.lselParcel) return;
+      if (Math.min(pc.x1, pc.x2) >= a[0] && Math.max(pc.x1, pc.x2) <= b[0] && Math.min(pc.y1, pc.y2) >= a[1] && Math.max(pc.y1, pc.y2) <= b[1]) out.push(pc.key);
+    });
+    if (!out.length) return toast('框內沒有線段（地籍線不列入）');
+    select({ kind: 'seg', idx: out, mapId: m.id });
+    toast('框選 ' + out.length + ' 段，可在右側改「歸屬」或線型');
   }
   function unsplit(keys) {
     var P = App.P, done = {};
@@ -1117,15 +1165,17 @@
       h += '<div class="ptitle">線段<small>' + R.esc(lay) + (isU ? '' : '　已選 ' + s.idx.length + ' 段（Shift+點選可多選）') + '</small></div>';
       h += '<div class="grid2">' + field('線型', dashSel('dash', first.dash, true)) + field('線寬 (mm)', inp('lw', first.lw || '', 'number', 'step="0.01" placeholder="依圖層"')) +
         field('顏色', color('color', first.color || R.lineStyle(P, isU ? (ul.role || 'case') : R.roleOf(P, lay, 'line'), null).color));
-      if (isU) h += field('用途', sel('role', ul.role || 'case', [['case', '現況線'], ['split', '分割線'], ['other', '其他線']])) + field('箭頭', arrowSel('arrow', ul.arrow));
+      if (isU) h += field('歸屬', sel('role', ul.role || 'case', [['case', '現況'], ['split', '分割'], ['other', '其他線']])) + field('箭頭', arrowSel('arrow', ul.arrow));
+      else h += field('歸屬（同一張 DXF 混在一起時用）', sel('role', first.role || '', [['', '依圖層設定'], ['case', '現況'], ['split', '分割'], ['parcel', '地籍線'], ['other', '其他線']]));
       h += '</div>';
       h += '<div class="btnrow"><span class="small">快速：</span>' + [['#ff0000', '紅'], ['#0050ff', '藍'], ['#000000', '黑']].map(function (c) { return '<button data-qc="' + c[0] + '" style="color:' + c[0] + '">' + c[1] + '</button>'; }).join('') +
         '<button data-qd="solid">實線</button><button data-qd="dash">虛線</button></div>';
-      h += '<div class="btnrow">' + btn('del', isU ? '刪除' : '隱藏此段', 'danger') + (!isU ? btn('clr', '恢復圖層樣式') : '') + (anySplit ? btn('unsplit', '取消斷線') : '') + '</div>';
+      h += '<div class="btnrow">' + btn('del', isU ? '刪除' : '隱藏此段', 'danger') + (!isU ? btn('clr', '恢復圖層樣式') : '') + (anySplit ? btn('unsplit', '取消斷線') : '') + (!isU ? btn('conn', '選取相連線段') : '') + '</div>';
       h += '<p class="small">要讓同一條線一半實線、一半虛線：用工具列「斷線(B)」在線上點一下切成兩段，再分別設定。</p>';
       box.innerHTML = h;
       bind(box, function () { return {}; }, function (k, v) {
-        if (k === 'dash' && v === '') v = null;
+        if ((k === 'dash' || k === 'role') && v === '') v = null;
+        if (k === 'role') setTimeout(function () { renderProps(); if (App.tab === 'layer') renderLayerTab(); }, 0);
         if (k === 'lw' && !v) v = null;
         if (isU) { if (v == null) delete ul[k]; else ul[k] = v; }
         else s.idx.forEach(function (key) { var o = P.segStyle[key] = P.segStyle[key] || {}; if (v == null) delete o[k]; else o[k] = v; });
@@ -1141,6 +1191,7 @@
         if (a.dataset.act === 'del') deleteSel();
         if (a.dataset.act === 'clr') { s.idx.forEach(function (k) { delete P.segStyle[k]; }); render(); changed(); renderProps(); }
         if (a.dataset.act === 'unsplit') { unsplit(s.idx); select(null); changed(); }
+        if (a.dataset.act === 'conn') { select({ kind: 'seg', idx: connectedPieces(s.idx), mapId: s.mapId }); }
       };
       return;
     }
@@ -1211,7 +1262,9 @@
   var FT_KEYS = [['code', '編號／名稱'], ['area', '面積'], ['landNo', '地號'], ['note', '備註'], ['owner', '所有權人'], ['extra', '其他(自訂)']];
   function ftableProps(el) {
     var h = '<div class="sec">地上物說明表</div>';
-    h += field('標題（列高 0 = 不顯示標題列）', inp('title', el.title)) + field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || ''));
+    h += field('標題（列高 0 = 不顯示標題列）', inp('title', el.title));
+    h += '<div class="grid2">' + field('列出哪一層', sel('ov', el.ov || '', [['', '全部']].concat(Object.keys(App.P.ovs).map(function (k) { return [k, App.P.ovs[k].name]; })))) +
+      field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || '')) + '</div>';
     h += '<div class="grid2">' + field('標題列高', inp('titleH', el.titleH, 'number', 'step="0.1" min="0"')) + field('標題字高', inp('titleFs', el.titleFs, 'number', 'step="0.05"')) +
       field('表頭列高（0=不顯示）', inp('headerH', el.headerH, 'number', 'step="0.1" min="0"')) + field('表頭字高', inp('headerFs', el.headerFs, 'number', 'step="0.05"')) +
       field('資料列高(預設)', inp('rowH', el.rowH, 'number', 'step="0.1"')) + field('內容字高', inp('dataFs', el.dataFs, 'number', 'step="0.05"')) +
@@ -1354,88 +1407,134 @@
     };
   }
   function renderFeatTab() {
-    var box = $('#tab-feat'), P = App.P, h = '';
+    var box = $('#tab-feat'), P = App.P, h = '', ov = P.activeOv || 'case', OV = P.ovs[ov];
+    // 圖層（現況 / 分割）切換：兩者互不影響，只是疊在一起展示
+    h += '<div class="ovbar">' + Object.keys(P.ovs).map(function (k) {
+      var o = P.ovs[k], n = P.features.filter(function (f) { return (f.ov || 'case') === k; }).length;
+      return '<button data-ov="' + k + '" class="' + (k === ov ? 'on' : '') + '">' + R.esc(o.name) + '（' + n + '）</button>' +
+        '<label class="inline small" title="顯示/隱藏此圖層"><input type="checkbox" data-ovvis="' + k + '"' + (o.visible !== false ? ' checked' : '') + '>顯示</label>';
+    }).join('') + '</div>';
+    h += '<p class="small">目前編輯「' + R.esc(OV.name) + '」：點選成面只用地籍線＋' + R.esc(OV.name) + '線當邊界，編號也獨立計算。</p>';
     h += '<div class="btnrow">' + btn('toolFace', '點選成面 (F)', 'primary') + btn('toolPoly', '手繪多邊形 (P)') + '</div>';
     var LC = P.settings.flistCols || ['landNo', 'note'], LN = { landNo: '地號', note: '備註', owner: '所有權人', extra: '其他' };
     h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th><th>' + LN[LC[0]] + '</th><th>' + LN[LC[1]] + '</th><th></th></tr></thead><tbody>';
-    var total = 0;
-    P.features.forEach(function (f, i) {
+    var total = 0, list = ovFeatures(ov);
+    list.forEach(function (f) {
       var a = parseFloat(R.featureArea(f, 2)) || 0; total += a;
       var on = App.sel && App.sel.id === f.id ? ' class="on"' : '';
-      h += '<tr data-fid="' + f.id + '"' + on + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td><td class="num">' + R.featureArea(f, 2) + '</td>' +
+      var calc = (G.area(f.pts) + (f.arcAdj || 0)).toFixed(2);
+      h += '<tr data-fid="' + f.id + '"' + on + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td>' +
+        '<td><input data-f="areaOverride" class="num" placeholder="' + calc + '" value="' + R.esc(f.areaOverride == null ? '' : f.areaOverride) + '" title="空白＝系統計算值 ' + calc + '；可直接輸入內網計算系統的面積"></td>' +
         '<td><input data-f="' + LC[0] + '" value="' + R.esc(f[LC[0]] || '') + '"></td><td><input data-f="' + LC[1] + '" value="' + R.esc(f[LC[1]] || '') + '"></td>' +
         '<td class="ops"><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
     });
     h += '</tbody></table>';
-    h += '<p class="small">合計 ' + total.toFixed(2) + ' m²（' + P.features.length + ' 筆）　清單欄位：' +
+    h += '<p class="small">面積欄空白＝系統計算值（灰字），也可以直接填入內網計算系統的面積。合計 ' + total.toFixed(2) + ' m²（' + list.length + ' 筆）。清單欄位：' +
       '<select id="flc0">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[0] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select>' +
       '<select id="flc1">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[1] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select></p>';
-    h += '<div class="sec">面積配賦（分割案）</div><div class="btnrow"><span class="small">登記總面積</span><input id="regArea" type="number" step="0.01" style="width:110px" value="' + (P.settings.regArea || '') + '">' +
-      btn('distribute', '依比例配賦尾差') + btn('undistribute', '清除配賦') + '</div>' +
-      '<p class="small">計算面積加總與登記面積不同時，把差額依面積比例分配到各筆（四捨五入到 0.01，尾差給餘數最大的），結果寫入各筆的「面積」欄，可再手動調整。</p>';
-    h += '<div class="btnrow"><span class="small">編號方式</span>' + sel('codeScheme', P.settings.codeScheme || 'alpha', [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']]) + '</div>';
+    h += '<div class="btnrow"><span class="small">編號方式</span>' + sel('_scheme', OV.codeScheme || 'alpha', [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']]) + '</div>';
     h += '<div class="btnrow">' + btn('recode', '依序重新編號') + btn('sortCode', '依編號排序') + '</div>';
-    var FR = P.settings.faceRoles || { parcel: true, case: true, split: true, other: false };
-    h += '<div class="sec">點選成面設定</div><p class="small">作為邊界的線：</p><div class="btnrow">' +
-      [['parcel', '地籍線'], ['case', '現況線'], ['split', '分割線'], ['other', '其他線']].map(function (r) { return '<label class="inline"><input type="checkbox" data-fr="' + r[0] + '"' + (FR[r[0]] ? ' checked' : '') + '>' + r[1] + '</label>'; }).join('') +
-      '</div><p class="small">Shift+點選：把相鄰區塊併入目前選取的地上物（例如跨越原地號界線的分割範圍）。</p>';
+    var FR = P.settings.faceRoles || { parcel: true, other: false };
+    h += '<div class="sec">點選成面設定</div><div class="btnrow">' +
+      '<label class="inline"><input type="checkbox" data-fr="parcel"' + (FR.parcel !== false ? ' checked' : '') + '>地籍線當邊界</label>' +
+      '<label class="inline"><input type="checkbox" data-fr="other"' + (FR.other ? ' checked' : '') + '>其他線當邊界</label></div>' +
+      '<p class="small">Shift+點選：把相鄰區塊併入目前選取的地上物。假合併的界線（打 X 的線）不會當邊界。</p>';
+    h += '<details><summary class="small">面積配賦（選用）</summary><div class="btnrow"><span class="small">登記總面積</span><input id="regArea" type="number" step="0.01" style="width:110px" value="' + (P.settings.regArea || '') + '">' +
+      btn('distribute', '配賦尾差') + btn('undistribute', '清除面積') + '</div></details>';
     box.innerHTML = h;
-    bind(box, P.settings);
     $$('[data-fr]', box).forEach(function (c) { c.onchange = function () { P.settings.faceRoles = Object.assign({}, FR); P.settings.faceRoles[c.dataset.fr] = c.checked; changed(); }; });
+    $$('[data-ovvis]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.ovvis].visible = c.checked; changed(); render(); }; });
+    $('[data-k=_scheme]', box).onchange = function () { OV.codeScheme = this.value; changed(); };
     ['flc0', 'flc1'].forEach(function (id, i) { $('#' + id, box).onchange = function () { var lc = LC.slice(); lc[i] = this.value; P.settings.flistCols = lc; renderFeatTab(); }; });
     $('#regArea', box).onchange = function () { P.settings.regArea = this.value; changed(); };
     $$('input[data-f]', box).forEach(function (i) {
       i.addEventListener('input', function () {
-        var f = featById(i.closest('tr').dataset.fid); f[i.dataset.f] = i.value; render(); changed();
+        var f = featById(i.closest('tr').dataset.fid), k = i.dataset.f;
+        f[k] = (k === 'areaOverride' && i.value.trim() === '') ? null : i.value; render(); changed();
       });
       i.addEventListener('focus', function () { var f = featById(i.closest('tr').dataset.fid); App.sel = { kind: 'feature', id: f.id, mapId: (maps()[0] || {}).id }; renderProps(); render(); });
     });
     box.onclick = function (ev) {
+      var o = ev.target.closest('[data-ov]');
+      if (o) { setActiveOv(o.dataset.ov); return; }
       var a = ev.target.closest('[data-act]');
       if (a) {
         if (a.dataset.act === 'toolFace') setTool('face');
         if (a.dataset.act === 'toolPoly') setTool('poly');
         if (a.dataset.act === 'distribute') distributeArea(parseFloat($('#regArea', box).value));
-        if (a.dataset.act === 'undistribute') { P.features.forEach(function (f) { f.areaOverride = null; }); changed(); render(); renderFeatTab(); }
-        if (a.dataset.act === 'recode') { P.features.forEach(function (f, i) { f.code = M.codeAt(i, P.settings.codeScheme); }); changed(); render(); renderFeatTab(); }
+        if (a.dataset.act === 'undistribute') { list.forEach(function (f) { f.areaOverride = null; }); changed(); render(); renderFeatTab(); }
+        if (a.dataset.act === 'recode') { list.forEach(function (f, i) { f.code = M.codeAt(i, OV.codeScheme); }); changed(); render(); renderFeatTab(); }
         if (a.dataset.act === 'sortCode') {
-          var order = {}; for (var i = 0; i < 300; i++) order[M.codeAt(i, P.settings.codeScheme)] = i;
-          P.features.sort(function (x, y) { var a1 = order[x.code], b1 = order[y.code]; return (a1 == null ? 999 : a1) - (b1 == null ? 999 : b1) || (x.code < y.code ? -1 : 1); });
+          var order = {}; for (var i = 0; i < 300; i++) order[M.codeAt(i, OV.codeScheme)] = i;
+          var sorted = list.slice().sort(function (x, y) { var a1 = order[x.code], b1 = order[y.code]; return (a1 == null ? 999 : a1) - (b1 == null ? 999 : b1) || (x.code < y.code ? -1 : 1); });
+          var others = P.features.filter(function (f) { return list.indexOf(f) < 0; });
+          P.features = others.concat(sorted);
           changed(); render(); renderFeatTab();
         }
         return;
       }
       var b = ev.target.closest('[data-fop]');
       if (b) {
-        var id = b.closest('tr').dataset.fid, i = P.features.findIndex(function (f) { return f.id === id; });
-        if (b.dataset.fop === 'del') P.features.splice(i, 1);
-        if (b.dataset.fop === 'up' && i > 0) P.features.splice(i - 1, 0, P.features.splice(i, 1)[0]);
-        if (b.dataset.fop === 'down' && i < P.features.length - 1) P.features.splice(i + 1, 0, P.features.splice(i, 1)[0]);
+        var id = b.closest('tr').dataset.fid, j = list.findIndex(function (f) { return f.id === id; });
+        var f = list[j], gi = P.features.indexOf(f);
+        if (b.dataset.fop === 'del') P.features.splice(gi, 1);
+        var nb = b.dataset.fop === 'up' ? list[j - 1] : b.dataset.fop === 'down' ? list[j + 1] : null;
+        if (nb) { var gj = P.features.indexOf(nb); P.features[gi] = nb; P.features[gj] = f; }
         changed(); render(); renderFeatTab(); return;
       }
       var tr = ev.target.closest('tr[data-fid]');
       if (tr && ev.target.tagName !== 'INPUT') select({ kind: 'feature', id: tr.dataset.fid, mapId: (maps()[0] || {}).id });
     };
   }
+  /* 目前編輯的圖層（現況 / 分割），工具列也有切換鈕 */
+  function setActiveOv(k) {
+    App.P.activeOv = k; changed(); updateOvBadge();
+    if (App.tab === 'feat') renderFeatTab();
+    toast('目前編輯：' + App.P.ovs[k].name);
+  }
+  function updateOvBadge() {
+    var b = $('#ovBadge'); if (!b) return;
+    var P = App.P;
+    b.innerHTML = '<span class="lbl">編輯</span>' + Object.keys(P.ovs).map(function (k) { return '<button data-setov="' + k + '" class="' + (k === P.activeOv ? 'on' : '') + '">' + R.esc(P.ovs[k].name) + '</button>'; }).join('');
+  }
   function renderLayerTab() {
     var box = $('#tab-layer'), P = App.P, S = P.styles, h = '';
     h += '<div class="btnrow">' + btn('import', '匯入 DXF…', 'primary') + '</div>';
     if (App.cad) {
       h += '<p class="small">圖資：' + R.esc(App.cad.name || '') + '</p>';
-      var layers = {};
-      App.cad.lines.forEach(function (l) { var k = 'line:' + l.layer; layers[k] = (layers[k] || 0) + 1; });
+      var layers = {}, colors = {};
+      App.cad.lines.forEach(function (l) {
+        var k = 'line:' + l.layer; layers[k] = (layers[k] || 0) + 1;
+        var ck = l.color == null ? '-' : l.color; colors[k] = colors[k] || {}; colors[k][ck] = (colors[k][ck] || 0) + 1;
+      });
       App.cad.texts.forEach(function (t) { var k = 'text:' + t.layer; layers[k] = (layers[k] || 0) + 1; });
       h += '<table class="flist"><thead><tr><th>圖層</th><th>數量</th><th>用途</th></tr></thead><tbody>';
       Object.keys(layers).sort().forEach(function (k) {
         var kind = k.split(':')[0], name = k.slice(kind.length + 1), role = R.roleOf(P, name, kind);
-        var opts = kind === 'line' ? [['parcel', '地籍線'], ['case', '現況/案件線'], ['split', '分割線'], ['other', '其他線'], ['hide', '不顯示']] : [['parcelNo', '地號'], ['target', '本案地號(紅)'], ['otherText', '其他文字'], ['hide', '不顯示']];
+        var opts = kind === 'line' ? [['parcel', '地籍線'], ['case', '現況'], ['split', '分割'], ['other', '其他線'], ['hide', '不顯示']] : [['parcelNo', '地號'], ['target', '本案地號(紅)'], ['otherText', '其他文字'], ['hide', '不顯示']];
         h += '<tr><td>' + R.esc(name) + '<small> ' + (kind === 'line' ? '線' : '字') + '</small></td><td class="num">' + layers[k] + '</td><td><select data-role="' + R.esc(k) + '">' +
           opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === role ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td></tr>';
+        // 同一圖層有多種顏色：可依顏色分別指定（例如紅色＝現況、藍色＝分割）
+        var cs = colors[k] && Object.keys(colors[k]);
+        if (kind === 'line' && cs && cs.length > 1) cs.forEach(function (c) {
+          if (c === '-') return;
+          var ck = k + '|' + c, cr = P.layerRoles[ck] || role;
+          h += '<tr class="sub"><td>└ <span class="sw" style="background:' + DXF.aciHex(+c) + '"></span>' + DXF.aciName(+c) + '</td><td class="num">' + colors[k][c] + '</td><td><select data-role="' + R.esc(ck) + '">' +
+            opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === cr ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td></tr>';
+        });
       });
       h += '</tbody></table>';
+      h += '<p class="small">現況線和分割線若輸出在同一張 DXF：① 圖層不同 → 上表分別指定；② 圖層相同但顏色不同 → 依顏色列指定；③ 都相同 → 用工具列「框選線段(Q)」或點一條線後按「選取相連線段」，再在右側把「歸屬」改成現況或分割。</p>';
+      var MG = P.merge, MI = R.mergeInfo(P, App.cad);
+      h += '<div class="sec">假合併（多筆地號合併後展示）</div>';
+      h += field('合併的地號（以頓號分隔）', '<input id="mgParcels" value="' + R.esc(MG.parcels || '') + '" placeholder="例：641、643、646">');
+      h += '<div class="grid2">' + field('原地號界線', '<select id="mgMode">' + [['x', '保留並打 X'], ['hide', '整條隱藏'], ['off', '不合併']].map(function (o) { return '<option value="' + o[0] + '"' + (MG.mode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>') +
+        field('X 大小 (mm)', '<input id="mgX" type="number" step="0.5" value="' + (MG.xSize || 3) + '">') + '</div>';
+      h += '<div class="btnrow">' + btn('mgDetect', '依圖上的 X 記號自動判斷') + '</div>';
+      h += '<p class="small">' + (MG.mode === 'off' ? '目前不合併。' : '找到界線 ' + Object.keys(MI.internal).length + ' 段' + (MI.missing.length ? '；找不到地號：' + R.esc(MI.missing.join('、')) : '')) + '　合併界線不會當作點選成面的邊界。</p>';
     } else h += '<p class="small">尚未匯入圖資。請匯入內網套疊產出的整段地籍 DXF（例：486.dxf），也可同時選取案件 DXF（例：KC1117.dxf）一起套疊。</p>';
     h += '<div class="sec">線條樣式（依用途）</div><table class="flist"><thead><tr><th></th><th>顏色</th><th>線寬</th><th>線型</th></tr></thead><tbody>';
-    [['parcelLine', '地籍線'], ['caseLine', '現況/案件線'], ['splitLine', '分割線'], ['otherLine', '其他線']].forEach(function (r) {
+    [['parcelLine', '地籍線'], ['caseLine', '現況'], ['splitLine', '分割'], ['otherLine', '其他線']].forEach(function (r) {
       h += '<tr><td>' + r[1] + '</td><td>' + color(r[0] + '.color', S[r[0]].color) + '</td><td>' + inp(r[0] + '.width', S[r[0]].width, 'number', 'step="0.01"') + '</td><td>' + dashSel(r[0] + '.dash', S[r[0]].dash) + '</td></tr>';
     });
     h += '</tbody></table>';
@@ -1456,8 +1555,19 @@
     $$('[data-role]', box).forEach(function (s) {
       s.addEventListener('change', function () { P.layerRoles[s.dataset.role] = s.value; render(); changed(); });
     });
+    var mgP = $('#mgParcels', box), mgM = $('#mgMode', box), mgX = $('#mgX', box);
+    if (mgP) {
+      mgP.onchange = function () { P.merge.parcels = mgP.value; changed(); render(); renderLayerTab(); };
+      mgM.onchange = function () { P.merge.mode = mgM.value; changed(); render(); renderLayerTab(); };
+      mgX.oninput = function () { P.merge.xSize = parseFloat(mgX.value) || 3; changed(); render(); };
+    }
     box.onclick = function (ev) {
       var a = ev.target.closest('[data-act]'); if (!a) return;
+      if (a.dataset.act === 'mgDetect') {
+        var det = R.detectMerge(P, App.cad);
+        if (det.length < 2) toast('圖上找不到合併的 X 記號，請直接輸入地號');
+        else { P.merge.parcels = det.join('、'); if (P.merge.mode === 'off') P.merge.mode = 'x'; changed(); render(); renderLayerTab(); toast('判斷為：' + det.join('、')); }
+      }
       if (a.dataset.act === 'import') importDXF();
       if (a.dataset.act === 'showSegs') { Object.keys(P.segStyle).forEach(function (k) { if (P.segStyle[k]) delete P.segStyle[k].hidden; }); changed(); render(); renderLayerTab(); }
       if (a.dataset.act === 'showTexts') { Object.keys(P.textOver).forEach(function (k) { if (P.textOver[k]) delete P.textOver[k].hidden; }); changed(); render(); renderLayerTab(); }
@@ -1627,13 +1737,14 @@
       face: '點選成面：在略圖內點選封閉區域，自動建立地上物並計算面積', poly: '多邊形：逐點點選（自動鎖點），雙擊或 Enter 完成，Esc 取消，Backspace 退一點',
       line: '畫現況線：逐點點選，雙擊或 Enter 完成（畫好後可在右側改線型、顏色）',
       sline: '畫分割線：逐點點選（自動鎖點），雙擊或 Enter 完成；畫好後可用「點選成面」切出分割範圍', break: '斷線：在線段上點一下，把它切成兩段，之後可分別設定線型（例如一段實線、一段虛線）', text: '文字：在略圖內點選＝圖面註記；在略圖外＝版面文字',
-      region: '框選 8K 套印範圍：在版面上拖曳一個矩形'
+      region: '框選 8K 套印範圍：在版面上拖曳一個矩形',
+      lsel: '框選線段：在略圖內拖曳矩形，選取完全在框內的現況/分割線（不含地籍線），再到右側改歸屬或線型'
     };
     $('#toolTip').textContent = tips[t] || '';
     render();
   }
   function refreshPanels() { renderProps(); renderLayerList(); if (App.tab) switchTab(App.tab); }
-  function refreshAll() { refreshPanels(); renderPlanSel(); render(); }
+  function refreshAll() { refreshPanels(); renderPlanSel(); updateOvBadge(); render(); }
 
   /* ================= 鍵盤 ================= */
   function onKey(ev) {
@@ -1651,7 +1762,7 @@
     if (ev.key === 'Enter' && App.draw) { finishDraw(); return; }
     if (ev.key === 'Backspace' && App.draw) { App.draw.pts.pop(); if (!App.draw.pts.length) App.draw = null; render(); ev.preventDefault(); return; }
     if (ev.key === 'Delete' || ev.key === 'Backspace') { deleteSel(); ev.preventDefault(); return; }
-    var map = { v: 'select', h: 'pan', f: 'face', p: 'poly', l: 'line', s: 'sline', b: 'break', t: 'text', r: 'region' };
+    var map = { v: 'select', h: 'pan', f: 'face', p: 'poly', l: 'line', s: 'sline', b: 'break', t: 'text', r: 'region', q: 'lsel' };
     if (!ctrl && map[ev.key.toLowerCase()]) { setTool(map[ev.key.toLowerCase()]); return; }
     if (ev.key === '0' && !ctrl) { fitView(); return; }
     if (ev.key.indexOf('Arrow') === 0 && App.sel) {
@@ -1703,6 +1814,7 @@
       else if (c === 'planAdd') addPlan(); else if (c === 'planRen') renamePlan(); else if (c === 'planDel') deletePlan();
     });
     $('#planSel').addEventListener('change', function () { switchPlan(+this.value); });
+    $('#ovBadge').addEventListener('click', function (ev) { var b = ev.target.closest('[data-setov]'); if (b) setActiveOv(b.dataset.setov); });
     $('#elList').addEventListener('click', function (ev) {
       var it = ev.target.closest('[data-eid]'); if (!it) return;
       var el = elById(it.dataset.eid), op = ev.target.closest('[data-eop]');
@@ -1713,7 +1825,7 @@
     App.lastSnap = snap();
     setTool('select');
     switchTab('case');
-    renderLayerList(); renderProps(); renderPlanSel();
+    renderLayerList(); renderProps(); renderPlanSel(); updateOvBadge();
     fitView();
     // 還原自動暫存
     function restore(saved) {
