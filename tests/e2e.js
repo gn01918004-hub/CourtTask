@@ -4,7 +4,7 @@ const path = require('path'), fs = require('fs');
 const OUT = process.argv[2] || path.join(__dirname, 'out');
 fs.mkdirSync(OUT, { recursive: true });
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./launch')();
   const pg = await b.newPage({ viewport: { width: 1600, height: 950 } });
   const errs = [];
   pg.on('pageerror', e => errs.push(e.message));

@@ -4,7 +4,7 @@ const path = require('path'), fs = require('fs');
 const DIR = process.argv[2], OUT = process.argv[3];
 if (!DIR || !fs.existsSync(DIR)) { console.log('請指定 .m02 範例資料夾'); process.exit(0); }
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./launch')();
   const errs = [];
   for (const f of fs.readdirSync(DIR).filter(f => /\.m02$/i.test(f))) {
     const pg = await b.newPage({ viewport: { width: 1600, height: 950 } });

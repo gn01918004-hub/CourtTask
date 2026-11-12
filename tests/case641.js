@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 const path = require('path'), fs = require('fs');
 const OUT = process.argv[2];
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./launch')();
   const pg = await b.newPage({ viewport: { width: 1600, height: 950 } });
   const errs = []; pg.on('pageerror', e => errs.push(e.message));
   pg.on('dialog', d => d.accept());

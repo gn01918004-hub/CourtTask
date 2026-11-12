@@ -4,7 +4,7 @@ const path = require('path'), fs = require('fs');
 const DIST = path.join(__dirname, '..', 'dist');
 const dir = fs.readdirSync(DIST).filter(d => /^CourtTask_v/.test(d) && fs.statSync(path.join(DIST, d)).isDirectory()).sort().pop();
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./launch')();
   let fail = 0;
   for (const page of [path.join(DIST, dir, 'CourtTask.html'), path.join(DIST, dir, 'app', 'index.html')]) {
     const ctx = await b.newContext({ offline: true, viewport: { width: 1500, height: 900 } });

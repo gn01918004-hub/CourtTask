@@ -201,12 +201,22 @@ Chrome 列印視窗請設定：紙張 A3（8K 請選印表機裡的 267×388 自
 ## 開發與測試
 
 ```bash
-node tests/geom.test.js          # DXF 解析與自動成面面積驗證
-node tests/e2e.js tests/out      # Chromium：匯入、成面、輸出 A3/8K PDF
-node tests/ui.js                 # Chromium：滑鼠拖拉格線、合併、移動圖面、復原…
-node tests/features.js           # 斷線、線型、標籤避線、方案、641/635 圖層辨識
-node tests/case641.js tests/out  # 重現中溝 641 方案三（1/2000、16 筆分割、所有權人、面積配賦）
-node tests/overlay.js tests/out  # 苑西 635：現況/分割分層、假合併自動判斷、框選線段改歸屬
+bash tests/run_all.sh                                   # 全部測試（Playwright 內建 Chromium）
+CHROME_PATH=/path/to/chromium147 bash tests/run_all.sh  # 用與內網相同的 Chrome 147 測試
+M02_DIR=/path/to/m02範例 bash tests/run_all.sh          # 另外測 .m02（含案件資料，不放進儲存庫）
 ```
 
-程式結構（`app/js`）：`geom.js` 幾何（裁切、面積、自動成面）、`dxf.js` DXF 讀寫（Big5／UTF-8）、`model.js` 資料模型與預設範本、`render.js` SVG 繪製、`print.js` 列印與 DXF 匯出、`app.js` 介面操作。
+取得 Chromium 147（Linux）的方法：先執行 `npm install @sparticuz/chromium@147.0.2`，再執行 `node -e "import('@sparticuz/chromium').then(async m => console.log(await m.default.executablePath()))"`，印出來的路徑就是 `CHROME_PATH`。
+
+各測試內容：
+
+- `tests/geom.test.js`：DXF 解析與自動成面的面積驗證
+- `tests/e2e.js`：匯入、成面、輸出 A3／8K PDF
+- `tests/ui.js`：滑鼠操作（雙擊表格、拉格線、合併儲存格、移圖、選單、8K 自動框選…）
+- `tests/features.js`：斷線、線型、標籤避線、方案、說明表樣式、預設值
+- `tests/case641.js`：重現中溝 641 方案三（1/2000、分割、所有權人、面積配賦、標號）
+- `tests/overlay.js`：苑西 635（現況／分割分層、假合併、改歸屬、右鍵、兩張說明表、清冊、拖拉規則）
+- `tests/m02.js`：開啟舊系統 .m02
+- `tests/dist.js`：在**斷網**環境下測試散發版（單檔版與多檔版）
+
+程式結構（`app/js`）：`geom.js` 幾何、`dxf.js` DXF 讀寫、`m02.js` 舊系統 .m02 讀取、`model.js` 資料模型與範本、`render.js` 繪製、`print.js` 列印、清冊、DXF 匯出、`app.js` 介面操作。

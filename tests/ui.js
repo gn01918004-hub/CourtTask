@@ -2,7 +2,7 @@
 const { chromium } = require('playwright');
 const path = require('path');
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./launch')();
   const pg = await b.newPage({ viewport: { width: 1600, height: 950 } });
   const errs = []; pg.on('pageerror', e => errs.push(e.message));
   await pg.goto('file://' + path.join(__dirname, '..', 'app', 'index.html'));

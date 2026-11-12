@@ -4,7 +4,7 @@ const path = require('path');
 const OUT = process.argv[2];
 const SM = p => path.join(__dirname, '..', 'samples', p);
 (async () => {
-  const b = await chromium.launch();
+  const b = await require('./launch')();
   const pg = await b.newPage({ viewport: { width: 1600, height: 950 } });
   const errs = []; pg.on('pageerror', e => errs.push(e.message)); pg.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.log('console:', m.text()); });
   const check = (name, cond) => { console.log((cond ? 'PASS ' : 'FAIL ') + name); if (!cond) errs.push(name); };
