@@ -334,11 +334,12 @@
     });
     var feats = all.filter(function (f) { return !f.inRegister; }), inReg = all.length - feats.length;   // 列入清冊的不在圖上表格
     var rowsF = [], kinds = [], cellsF = [], cols = el.columns || [], autoF = el.autoRowH !== false;
+    var allReg = !feats.length && inReg > 0;   // 全部列入清冊：只留標題＋「詳如清冊」
     if (el.titleH > 0) {
       rowsF.push(el.titleH); kinds.push('title');
       cellsF.push({ r: 0, c: 0, cs: cols.length, text: M.fill(el.title, F), align: 'center', valign: 'middle', fs: el.titleFs, fit: 'shrink' });
     }
-    if (el.headerH > 0) {
+    if (el.headerH > 0 && !allReg) {
       var hr = rowsF.length; rowsF.push(el.headerH); kinds.push('header');
       cols.forEach(function (c, i) { cellsF.push({ r: hr, c: i, text: c.header || '', align: 'center', valign: 'middle', fs: el.headerFs, fit: 'shrink' }); });
     }
@@ -354,9 +355,9 @@
       });
       rowsF.push(autoF ? Math.max(base, Math.round(nd * 100) / 100) : base); kinds.push(f.id);
     });
-    if (inReg > 0) {   // 其餘項目詳如清冊
-      var rr = rowsF.length; rowsF.push(el.rowH); kinds.push('register');
-      cellsF.push({ r: rr, c: 0, cs: cols.length, text: M.fill(el.registerText || '其餘 ' + inReg + ' 筆詳如清冊', F), align: 'center', valign: 'middle', fs: el.dataFs * 0.85, fit: 'shrink' });
+    if (inReg > 0) {   // 其餘項目詳如清冊；全部進清冊時只寫「詳如清冊」
+      var rr = rowsF.length; rowsF.push(allReg ? Math.max(el.rowH, 12) : el.rowH); kinds.push('register');
+      cellsF.push({ r: rr, c: 0, cs: cols.length, text: allReg ? M.fill(el.registerAllText || '詳如清冊', F) : M.fill(el.registerText || '其餘 ' + inReg + ' 筆詳如清冊', F), align: 'center', valign: 'middle', fs: allReg ? el.dataFs : el.dataFs * 0.85, fit: 'shrink' });
     }
     // 合併儲存格：{ fid: 起始列的說明項目, n: 列數, c: 起始欄, cs: 欄數 }
     (el.merges || []).forEach(function (mg) {
@@ -372,7 +373,7 @@
       });
       if (anchor) { anchor.rs = n; anchor.cs = cs; anchor.merged = true; }
     });
-    if (el.notesH > 0) {
+    if (el.notesH > 0 && !(allReg && !el.stackBelow)) {
       var ntext = M.fill(el.notes, F), tw = cols.length ? el.cols.reduce(function (a, b) { return a + b; }, 0) : 50;
       rowsF.push(Math.max(el.notesH, needH(ntext, tw, el.notesFs, 'kai', 1.25))); kinds.push('notes');
       cellsF.push({ r: rowsF.length - 1, c: 0, cs: cols.length, text: ntext, align: 'left', valign: 'top', fs: el.notesFs, lh: 1.25 });
