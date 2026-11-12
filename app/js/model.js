@@ -127,7 +127,7 @@
       annos: [],
       userLines: [],
       elements: defaultElements(),
-      output: { k8: { w: 267, h: 388, offX: 20, offY: 20, dx: 0, dy: 0, region: null } },
+      output: { k8: { w: 388, h: 267, offX: 20, offY: 20, dx: 0, dy: 0, region: null } },
       settings: { snapEdges: true, faceWithParcel: true, codeScheme: 'alpha' },
       splits: {},
       ovs: { case: { name: '現況', visible: true, codeScheme: 'alpha' }, split: { name: '分割', visible: true, codeScheme: 'stem', schemeSet: true } },

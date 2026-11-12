@@ -70,7 +70,10 @@ const ROOT = path.join(__dirname, '..');
   ok(r < 0.01, '工具列縮放以畫面中心為基準', r);
   // 8K：預設範本自動框選 → 自動改橫式；真的放不下會提醒
   r = await pg.evaluate(() => { document.querySelector('[data-tab=out]').click(); document.querySelector('[data-act=regionAuto]').click(); const pgk = Printer.k8Page(App.P), o = App.P.output.k8; return { pgk, need: [o.region.w + o.offX, o.region.h + o.offY], status: document.querySelector('#k8Status').textContent }; });
-  ok(r.pgk.swapped && r.pgk.fits && r.pgk.w === 388 && r.need[0] <= 388 && /橫式/.test(r.status), '8K 自動框選放不下直式時改用橫式', r);
+  ok(!r.pgk.swapped && r.pgk.fits && r.pgk.w === 388 && r.pgk.h === 267 && r.need[0] <= 388 && r.need[1] <= 267 && /放得下/.test(r.status), '8K 預設橫放 388×267，自動框選放得下', r);
+  r = await pg.evaluate(() => { const d = JSON.parse(JSON.stringify(App.api.fileData())); d.project.output.k8.w = 267; d.project.output.k8.h = 388; App.api.loadData(d); const o = App.P.output.k8; App.P.fields.note1 = '1'; return [o.w, o.h]; });
+  await pg.waitForTimeout(500);
+  ok(r[0] === 388 && r[1] === 267, '舊專案的 8K 直式設定開啟時改成橫式', r);
   dialogs = [];
   r = await pg.evaluate(() => { let n = 0; window.print = () => { n++; }; const o = App.P.output.k8, keep = JSON.stringify(o.region); o.region = { x: 0, y: 0, w: 420, h: 297 }; document.querySelector('#toolbar [data-cmd=print8k]').click(); o.region = JSON.parse(keep); return new Promise(res => setTimeout(() => res(n), 200)); });
   ok(dialogs.some(d => /超出/.test(d)), '8K 範圍比紙張大時先提醒', dialogs.map(d => d.slice(0, 30)));

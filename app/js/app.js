@@ -149,6 +149,8 @@
     var base = M.newProject();
     ['styles', 'sheet', 'output', 'settings', 'fields'].forEach(function (k) { P[k] = Object.assign(base[k], P[k] || {}); });
     P.output.k8 = Object.assign(M.newProject().output.k8, P.output.k8 || {});
+    // 8K 紙（紙夾標示 267×388）實際是橫放：寬 388、高 267。舊專案／舊範本存的是直式，開啟時改成橫式
+    if (+P.output.k8.w === 267 && +P.output.k8.h === 388) { P.output.k8.w = 388; P.output.k8.h = 267; }
     P.userLines = P.userLines || []; P.annos = P.annos || []; P.features = P.features || [];
     P.segStyle = P.segStyle || {}; P.textOver = P.textOver || {}; P.layerRoles = P.layerRoles || {}; P.splits = P.splits || {};
     if (!P.plans || !P.plans.length) { P.plans = [{ name: '方案1', data: null }]; P.planIdx = 0; }
@@ -2104,6 +2106,7 @@
       field('印表位移 X (mm)', inp('sheet.dx', P.sheet.dx, 'number', 'step="0.1"')) + field('印表位移 Y (mm)', inp('sheet.dy', P.sheet.dy, 'number', 'step="0.1"')) + '</div>';
     h += '<div class="btnrow">' + btn('printA3', '列印 A3 成果圖', 'primary') + '</div>';
     h += '<div class="sec">② 8K 圖紙套印（框選部分 1:1）</div>';
+    h += '<p class="small">8K 紙（紙夾標示 267×388）為<b>橫放</b>：寬 388、高 267。</p>';
     h += '<div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number')) +
       field('左下平移 X (mm)', inp('output.k8.offX', o.offX, 'number', 'step="0.1"')) + field('左下平移 Y (mm)', inp('output.k8.offY', o.offY, 'number', 'step="0.1"')) +
       field('印表位移 X', inp('output.k8.dx', o.dx, 'number', 'step="0.1"')) + field('印表位移 Y', inp('output.k8.dy', o.dy, 'number', 'step="0.1"')) + '</div>';
@@ -2200,7 +2203,7 @@
     var P = App.P, o = P.output.k8; if (!o.region) return '';
     var pg = Printer.k8Page(P);
     if (!pg.fits) return '<p class="small warn">⚠ 範圍比紙張大：' + (pg.overW > 0 ? '寬度超出 ' + round(pg.overW, 1) + ' mm　' : '') + (pg.overH > 0 ? '高度超出 ' + round(pg.overH, 1) + ' mm' : '') + '。超出的部分印不出來，請縮小範圍或修改紙張大小。</p>';
-    return '<p class="small">' + (pg.swapped ? '範圍比直式紙張寬，列印時會自動改用<b>橫式 ' + pg.w + '×' + pg.h + ' mm</b>（紙張請橫放）。' : '紙張 ' + pg.w + '×' + pg.h + ' mm，範圍放得下。') + '</p>';
+    return '<p class="small">' + (pg.swapped ? '範圍比直式紙張寬，列印時會自動改用<b>橫式 ' + pg.w + '×' + pg.h + ' mm</b>（紙張請橫放）。' : '紙張寬 ' + pg.w + ' × 高 ' + pg.h + ' mm，範圍放得下。') + '</p>';
   }
   /* 8K 套印範圍：左側說明欄右緣 → 外框右緣；外框頂端 → 略圖、說明表、指北針的最底部（不含主任、日期） */
   function autoRegion() {
