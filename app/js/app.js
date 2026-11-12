@@ -1265,6 +1265,10 @@
     App.sel = s;
     if (!keepCell) App.selCell = null;
     render(); renderProps();
+    // 點到說明表 → 左側切到「說明」；點到左側說明欄（一般表格）→ 切到「案件資料」
+    var want = null;
+    if (s && s.kind === 'el') { var se = elById(s.id); if (se && se.type === 'ftable') want = 'feat'; else if (se && se.type === 'table') want = 'case'; }
+    if (want && App.tab !== want) { switchTab(want); return; }
     if (App.tab === 'feat') renderFeatTab();
   }
   function deleteSel() {
@@ -1846,7 +1850,9 @@
       });
       h += '</tbody></table>';
       var nReg = list.filter(function (f) { return f.inRegister; }).length;
-      if (regOn) h += '<div class="btnrow"><span class="small">勾選的項目會列印成清冊' + (nReg ? '（已勾 ' + nReg + ' 筆）' : '') + '</span>' + (nReg ? '<button data-regprint="' + ov + '">列印清冊</button><button data-regcsv="' + ov + '">清冊 CSV</button>' : '') + '</div>';
+      if (regOn) h += '<div class="btnrow"><span class="small">勾選的項目會列印成清冊' + (nReg ? '（已勾 ' + nReg + ' 筆）' : '') + '</span>' +
+        '<button data-regall="' + ov + '">' + (nReg === list.length && list.length ? '全部取消' : '全選') + '</button>' +
+        (nReg ? '<button data-regprint="' + ov + '">列印清冊</button><button data-regcsv="' + ov + '">清冊 CSV</button>' : '') + '</div>';
       h += '<div class="btnrow"><span class="small">合計 ' + total.toFixed(2) + ' m²（' + list.length + ' 筆）　編號</span>' +
         '<select data-scheme="' + ov + '">' + [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']].map(function (o) { return '<option value="' + o[0] + '"' + (ovScheme(ov) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
         '<button data-recode="' + ov + '">重新編號</button><button data-addrow="' + ov + '" title="只在說明表加一列（不在圖上）">＋空白列</button></div>';
@@ -1879,6 +1885,8 @@
     }; });
     box.onclick = function (ev) {
       var jn = ev.target.closest('[data-join]'); if (jn) { joinFtables(jn.dataset.join === '1'); return; }
+      var ra = ev.target.closest('[data-regall]');
+      if (ra) { var lst = ovFeatures(ra.dataset.regall), allOn = lst.length && lst.every(function (f) { return f.inRegister; }); lst.forEach(function (f) { f.inRegister = !allOn; }); changed(); render(); renderFeatTab(); return; }
       var hd = ev.target.closest('.fbhead[data-ov]'); if (hd) { setActiveOv(hd.dataset.ov); return; }
       var rp = ev.target.closest('[data-regprint],[data-regcsv]');
       if (rp) {

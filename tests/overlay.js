@@ -76,6 +76,12 @@ const OUT = process.argv[2];
     return { inTable: tm.kinds.indexOf(id) >= 0, regRow: tm.kinds.indexOf('register') >= 0, regText: (tm.cells.find(c => /詳如清冊/.test(c.text)) || {}).text, csv: Printer.registerCSV(App.P, ft).indexOf(f.code) >= 0 };
   }, regId);
   check('清冊：圖上表格改寫「詳如清冊」、CSV 有資料 ' + JSON.stringify(rg), !rg.inTable && rg.regRow && rg.csv);
+  await pg.click('#tab-feat [data-regall=split]');
+  const allReg = await pg.evaluate(() => App.P.features.filter(f => f.ov === 'split').every(f => f.inRegister));
+  await pg.click('#tab-feat [data-regall=split]');
+  const noneReg = await pg.evaluate(() => App.P.features.filter(f => f.ov === 'split').every(f => !f.inRegister));
+  check('清冊全選／全部取消 ' + [allReg, noneReg], allReg && noneReg);
+  await pg.check('[data-reg="' + regId + '"]');
   await pg.uncheck('[data-reg="' + regId + '"]');
   await pg.uncheck('[data-regon=split]');
   // 說明頁最上方的「兩張說明表：接在一起／分開擺放」
@@ -114,6 +120,14 @@ const OUT = process.argv[2];
   await pg.click('#props [data-act=stackJoin]');
   const sp2 = await pg.evaluate(() => { const a = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'case'), t = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'), ba = Render.bounds(a, App.P); return { joined: t.stackBelow === a.id, gap: Math.round((t.y - ba.y - ba.h) * 100) / 100, notesTop: a.notesH }; });
   check('分開／接合按鈕 ' + JSON.stringify({ sp1, sp2 }), sp1 === false && sp2.joined && sp2.gap === 0 && sp2.notesTop === 0);
+  // 點說明表 → 左側切到「說明」；點左側說明欄 → 切到「案件資料」
+  const tabs2 = await pg.evaluate(() => {
+    const out = [];
+    App.api.selectFn({ kind: 'el', id: App.P.elements.find(e => e.type === 'ftable').id }); out.push(App.tab);
+    App.api.selectFn({ kind: 'el', id: App.P.elements.find(e => e.type === 'table').id }); out.push(App.tab);
+    return out;
+  });
+  check('點表格自動切換左側頁籤 ' + tabs2, tabs2[0] === 'feat' && tabs2[1] === 'case');
   // 分割的面不受現況線影響：split 面積 = 只用地籍線+分割線的面
   const ok = await pg.evaluate(() => {
     const m = App.P.elements.find(e => e.type === 'map'); const f = App.P.features.find(f => f.ov === 'split');
