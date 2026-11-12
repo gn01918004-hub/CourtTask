@@ -20,6 +20,7 @@ run tests/ui.js
 run tests/features.js "$OUT"
 run tests/case641.js "$OUT"
 run tests/overlay.js "$OUT"
+run tests/fixes.js
 [ -n "${M02_DIR:-}" ] && run tests/m02.js "$M02_DIR" "$OUT"
 [ -d dist ] && run tests/dist.js
 grep -q . /dev/null

@@ -48,17 +48,20 @@
   }
 
   /* 標籤位置：面積重心若不在多邊形內，改用格點搜尋離邊界最遠的點 */
-  function labelPoint(pts) {
+  function labelPoint(pts, holes) {
     if (!pts || !pts.length) return null;
+    holes = holes && holes.length ? holes : null;
+    function inHole(p) { if (!holes) return false; for (var h = 0; h < holes.length; h++) if (pointInPoly(p, holes[h])) return true; return false; }
+    function dist(p) { var d = edgeDist(p, pts); if (holes) for (var h = 0; h < holes.length; h++) d = Math.min(d, edgeDist(p, holes[h])); return d; }
     var c = centroid(pts);
-    if (pointInPoly(c, pts) && edgeDist(c, pts) > 0) {
+    if (pointInPoly(c, pts) && !inHole(c) && edgeDist(c, pts) > 0) {
       return c;
     }
     var b = bbox(pts), best = null, bestD = -1, N = 24;
     for (var i = 1; i < N; i++) for (var j = 1; j < N; j++) {
       var p = [b[0] + (b[2] - b[0]) * i / N, b[1] + (b[3] - b[1]) * j / N];
-      if (!pointInPoly(p, pts)) continue;
-      var d = edgeDist(p, pts);
+      if (!pointInPoly(p, pts) || inHole(p)) continue;
+      var d = dist(p);
       if (d > bestD) { bestD = d; best = p; }
     }
     return best || c;
@@ -213,7 +216,7 @@
       out.push(list);
     }
     // 走訪半邊：每個半邊左側的面
-    var used = {}, faces = [];
+    var used = {}, faces = [], outers = [];
     for (v = 0; v < nodes.length; v++) {
       for (var e = 0; e < out[v].length; e++) {
         var w = out[v][e];
@@ -229,10 +232,11 @@
         if (poly.length >= 3) {
           var sa = signedArea(relative(poly));
           if (sa > 1e-6) { poly.ids = ids; faces.push(poly); }
+          else if (sa < -1e-6) { poly.ids = ids; outers.push(poly); }   // 一組相連線段的最外圈（順時針）
         }
       }
     }
-    faces.nodes = nodes;
+    faces.nodes = nodes; faces.outers = outers;
     return faces;
   }
   function projT(p, a, b) {
@@ -245,7 +249,26 @@
     return poly.map(function (p) { return [p[0] - ox, p[1] - oy]; });
   }
 
-  /* 找出包含 p 的最小封閉面 */
+  /* 面內的「島」：與外圈不相連、完全落在面內的封閉線段群（例如空地中間不碰界線的建物）。
+     回傳各島的最外圈，計算面積時要扣掉。只取直接位於此面內的島（島中島屬於內層的面）。 */
+  function holesOf(faces, face) {
+    var res = [], own = {};
+    (face.ids || []).forEach(function (id) { own[id] = 1; });
+    (faces.outers || []).forEach(function (o) {
+      if (own[o.ids[0]]) return;
+      var p = o[0];
+      if (!pointInPoly(p, face)) return;
+      var fa = area(face), nested = false;
+      for (var i = 0; i < faces.length && !nested; i++) {
+        var f = faces[i];
+        if (f === face || f.ids.indexOf(o.ids[0]) >= 0) continue;
+        if (pointInPoly(p, f) && area(f) < fa) nested = true;
+      }
+      if (!nested) res.push(simplify(o.slice().reverse()));
+    });
+    return res;
+  }
+  /* 找出包含 p 的最小封閉面；面內有島時附在 .holes */
   function faceAt(segs, p, tol) {
     var faces = buildFaces(segs, tol), best = null, bestA = Infinity;
     for (var i = 0; i < faces.length; i++) {
@@ -253,7 +276,10 @@
       var a = area(faces[i]);
       if (a < bestA) { bestA = a; best = faces[i]; }
     }
-    return best ? simplify(best) : null;
+    if (!best) return null;
+    var res = simplify(best);
+    res.holes = holesOf(faces, best);
+    return res;
   }
   /* 合併多個點所在的面（相鄰面去掉共用邊），回傳外圍多邊形 */
   function faceUnionAt(segs, pts, tol) {
@@ -264,7 +290,9 @@
       if (best && chosen.indexOf(best) < 0) chosen.push(best);
     });
     if (!chosen.length) return null;
-    if (chosen.length === 1) return simplify(chosen[0]);
+    var holes = [];
+    chosen.forEach(function (f) { holes = holes.concat(holesOf(faces, f)); });
+    if (chosen.length === 1) { var one = simplify(chosen[0]); one.holes = holes; return one; }
     var edges = {};
     chosen.forEach(function (f) {
       for (var i = 0; i < f.ids.length; i++) { var a = f.ids[i], b = f.ids[(i + 1) % f.ids.length]; edges[a + '>' + b] = (edges[a + '>' + b] || 0) + 1; }
@@ -293,7 +321,8 @@
     if (!loops.length) return null;
     loops.sort(function (a, b) { return area(b) - area(a); });
     var res = simplify(loops[0]);
-    res.parts = chosen.length;
+    for (var li = 1; li < loops.length; li++) if (area(loops[li]) > 1e-6) holes.push(simplify(loops[li]));   // 合併後圍出的內圈
+    res.parts = chosen.length; res.holes = holes;
     return res;
   }
 
@@ -344,8 +373,17 @@
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   }
 
+  function areaRel(pts) { return pts && pts.length >= 3 ? Math.abs(signedArea(relative(pts))) : 0; }
+
   global.Geom = {
-    signedArea: signedArea, area: function (pts) { return pts && pts.length >= 3 ? Math.abs(signedArea(relative(pts))) : 0; },
+    signedArea: signedArea, area: areaRel,
+    /* 多邊形面積扣掉內部的島 */
+    areaNet: function (pts, holes) { var a = areaRel(pts); (holes || []).forEach(function (h) { a -= areaRel(h); }); return a; },
+    inPolyNet: function (p, pts, holes) {
+      if (!pts || pts.length < 3 || !pointInPoly(p, pts)) return false;
+      for (var i = 0; holes && i < holes.length; i++) if (pointInPoly(p, holes[i])) return false;
+      return true;
+    },
     centroid: centroid, pointInPoly: pointInPoly, distToSeg: distToSeg,
     labelPoint: labelPoint, bbox: bbox, clipSeg: clipSeg, clipPoly: clipPoly,
     segIntersect: segIntersect, buildFaces: buildFaces, faceAt: faceAt, faceUnionAt: faceUnionAt, arcCorrection: arcCorrection, simplify: simplify, median: median

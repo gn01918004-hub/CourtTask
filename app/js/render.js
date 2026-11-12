@@ -382,11 +382,13 @@
   }
 
   /* 說明項目的定位點：一般為面的內部點；「標號」（不算面積）為點選的位置 */
-  function featAnchor(f) { return f.pt || G.labelPoint(f.pts); }
+  function featAnchor(f) { return f.pt || G.labelPoint(f.pts, f.holes); }
+  /* 計算面積（m²）：外圈扣掉內部的島，加上圓弧修正 */
+  function featCalc(f) { return f.pt || !f.pts || f.pts.length < 3 ? 0 : G.areaNet(f.pts, f.holes) + (f.arcAdj || 0); }
   function featureArea(f, dec) {
     if (f.areaOverride != null && f.areaOverride !== '') return String(f.areaOverride);
     if (f.pt || !f.pts || f.pts.length < 3) return '';
-    return (G.area(f.pts) + (f.arcAdj || 0)).toFixed(dec == null ? 2 : dec);
+    return featCalc(f).toFixed(dec == null ? 2 : dec);
   }
 
   function cellRect(el, tm, c) {
@@ -632,9 +634,9 @@
 
     // 地上物填色（在線之下）
     visFeatures(P).forEach(function (f) {
-      if (!f.fill) return;
-      var d = f.pts.map(function (p, i) { var q = v.toP(p[0], p[1]); return (i ? 'L' : 'M') + n(q[0]) + ' ' + n(q[1]); }).join('') + 'Z';
-      s += '<path d="' + d + '" fill="' + f.fill + '" fill-opacity="' + (f.fillOpacity == null ? 0.25 : f.fillOpacity) + '" stroke="none"/>';
+      if (!f.fill || !f.pts || f.pts.length < 3) return;
+      var d = [f.pts].concat(f.holes || []).map(function (ring) { return ring.map(function (p, i) { var q = v.toP(p[0], p[1]); return (i ? 'L' : 'M') + n(q[0]) + ' ' + n(q[1]); }).join('') + 'Z'; }).join('');
+      s += '<path d="' + d + '" fill="' + f.fill + '" fill-rule="evenodd" fill-opacity="' + (f.fillOpacity == null ? 0.25 : f.fillOpacity) + '" stroke="none"/>';
     });
 
     var groups = { parcel: '', other: '', split: '', case: '' }, special = '';
@@ -674,7 +676,7 @@
     // 地上物外框
     visFeatures(P).forEach(function (f) {
       if (!f.outline || !f.pts || f.pts.length < 3) return;
-      var d = f.pts.map(function (p, i) { var q = v.toP(p[0], p[1]); return (i ? 'L' : 'M') + n(q[0]) + ' ' + n(q[1]); }).join('') + 'Z';
+      var d = [f.pts].concat(f.holes || []).map(function (ring) { return ring.map(function (p, i) { var q = v.toP(p[0], p[1]); return (i ? 'L' : 'M') + n(q[0]) + ' ' + n(q[1]); }).join('') + 'Z'; }).join('');
       var lw = f.lw || ST.caseLine.width;
       s += '<path d="' + d + '" fill="none" stroke="' + (f.color || ST.caseLine.color) + '" stroke-width="' + n(lw) + '" stroke-linejoin="round"' + dashAttr(f.dash, lw) + '/>';
     });
@@ -784,7 +786,7 @@
   global.Render = {
     esc: esc, renderSheet: renderSheet, renderElement: renderElement, renderGhost: renderGhost, mapView: mapView,
     tableModel: tableModel, cellRect: cellRect, bounds: bounds, roleOf: roleOf, defaultRole: defaultRole,
-    featureArea: featureArea, featAnchor: featAnchor, fieldsOf: fieldsOf, pieces: pieces, eachPiece: eachPiece, lineStyle: lineStyle, roleStyle: roleStyle,
+    featureArea: featureArea, featCalc: featCalc, featAnchor: featAnchor, fieldsOf: fieldsOf, pieces: pieces, eachPiece: eachPiece, lineStyle: lineStyle, roleStyle: roleStyle,
     DASH_LIST: DASH_LIST, textScales: textScales, updateBoth: updateBoth, mergeInfo: mergeInfo, detectMerge: detectMerge, parseParcels: parseParcels, featOv: featOv, visFeatures: visFeatures, normDash: normDash, layoutLabels: layoutLabels, lastLayout: lastLayout
   };
 })(typeof window !== 'undefined' ? window : globalThis);
