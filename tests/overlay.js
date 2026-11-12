@@ -75,6 +75,36 @@ const OUT = process.argv[2];
   }, regId);
   check('清冊：圖上表格改寫「詳如清冊」、CSV 有資料 ' + JSON.stringify(rg), !rg.inTable && rg.regRow && rg.csv);
   await pg.uncheck('[data-reg="' + regId + '"]');
+  // 說明頁：分割區塊的輸入欄位＝所有權人；現況區塊＝地號、備註
+  await pg.click('.tabs [data-tab=feat]');
+  const heads = await pg.evaluate(() => Array.from(document.querySelectorAll('#tab-feat .fblock')).map(b => Array.from(b.querySelectorAll('thead th')).map(t => t.textContent).join('/')));
+  check('說明頁輸入欄位跟表格走 ' + JSON.stringify(heads), heads.length === 2 && /地號.*備註/.test(heads[0]) && /所有權人/.test(heads[1]));
+  // 拖拉規則：兩張表一致（欄＝互讓總寬不變、列＝只改該列）
+  for (const ov of ['case', 'split']) {
+    const info = await pg.evaluate((ov) => {
+      const t = App.P.elements.find(e => e.type === 'ftable' && e.ov === ov), tm = Render.tableModel(t, App.P);
+      App.api.setTool('select'); App.api.fitView(); App.api.selectFn({ kind: 'el', id: t.id }); App.tableEdit = t.id; App.api.render();
+      const r = document.getElementById('svg').getBoundingClientRect(); const S = (x, y) => [r.left + (x - App.view.ox) * App.view.z, r.top + (y - App.view.oy) * App.view.z];
+      const b = Render.bounds(t, App.P), fd = tm.kinds.findIndex(k => !['title', 'header', 'notes', 'register'].includes(k));
+      let y = t.y; for (let i = 0; i <= fd; i++) y += tm.rows[i];
+      return { col: S(t.x + t.cols[0], b.y + b.h * 0.5), row: S(t.x + t.cols[0] / 2, y), w: Math.round(b.w * 100) / 100, cols: t.cols.slice(), rows: tm.rows.slice(), fs: t.dataFs, fd };
+    }, ov);
+    const z = await pg.evaluate(() => App.view.z);
+    await pg.mouse.move(info.col[0], info.col[1]); await pg.mouse.down(); await pg.mouse.move(info.col[0] + 4 * z, info.col[1], { steps: 4 }); await pg.mouse.up();
+    await pg.mouse.move(info.row[0], info.row[1]); await pg.mouse.down(); await pg.mouse.move(info.row[0], info.row[1] + 5 * z, { steps: 4 }); await pg.mouse.up();
+    const after = await pg.evaluate((ov) => { const t = App.P.elements.find(e => e.type === 'ftable' && e.ov === ov), tm = Render.tableModel(t, App.P), b = Render.bounds(t, App.P); return { w: Math.round(b.w * 100) / 100, cols: t.cols.slice(), rows: tm.rows.slice(), fs: t.dataFs }; }, ov);
+    const okCol = after.w === info.w && Math.abs(after.cols[0] - info.cols[0] - 4) < 0.6;
+    const okRow = Math.abs(after.rows[info.fd] - info.rows[info.fd] - 5) < 0.6 && after.rows[info.fd + 1] === info.rows[info.fd + 1];
+    check(ov + ' 表：拖欄互讓（總寬不變）、拖列只改該列、字高不變 ' + JSON.stringify({ w: [info.w, after.w], c0: [info.cols[0], after.cols[0]], r: [info.rows[info.fd], after.rows[info.fd]], next: [info.rows[info.fd + 1], after.rows[info.fd + 1]] }), okCol && okRow && after.fs === info.fs);
+    await pg.keyboard.press('Escape');
+  }
+  // 舊專案：分開 → 再接合
+  await pg.evaluate(() => { const t = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'); App.api.selectFn({ kind: 'el', id: t.id }); });
+  await pg.click('#props [data-act=stackSplit]');
+  const sp1 = await pg.evaluate(() => { const t = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'); return !!t.stackBelow; });
+  await pg.click('#props [data-act=stackJoin]');
+  const sp2 = await pg.evaluate(() => { const a = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'case'), t = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'), ba = Render.bounds(a, App.P); return { joined: t.stackBelow === a.id, gap: Math.round((t.y - ba.y - ba.h) * 100) / 100, notesTop: a.notesH }; });
+  check('分開／接合按鈕 ' + JSON.stringify({ sp1, sp2 }), sp1 === false && sp2.joined && sp2.gap === 0 && sp2.notesTop === 0);
   // 分割的面不受現況線影響：split 面積 = 只用地籍線+分割線的面
   const ok = await pg.evaluate(() => {
     const m = App.P.elements.find(e => e.type === 'map'); const f = App.P.features.find(f => f.ov === 'split');

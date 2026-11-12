@@ -649,7 +649,10 @@
     var hh = hitHandle(p);
     if (hh) { var se = elById(App.sel.id); drag = { type: 'resize', el: se, h: hh, sp: p, orig: clone(se), b: R.bounds(se, App.P) }; return; }
     var dv = hitDivider(p);
-    if (dv) { var te = elById(App.sel.id); drag = { type: 'divider', el: te, d: dv, sp: p, orig: clone(te), shift: ev.shiftKey }; return; }
+    if (dv) {
+      var te = elById(App.sel.id), upT = te.stackBelow ? elById(te.stackBelow) : null;
+      drag = { type: 'divider', el: te, d: dv, sp: p, orig: clone(te), shift: ev.shiftKey, upOrig: upT && upT.cols ? upT.cols.slice() : null }; return;
+    }
     // 說明項目頂點
     if (App.sel && (App.sel.kind === 'feature' || App.sel.kind === 'flabel')) {
       var f = featById(App.sel.id), fm = elById(App.sel.mapId);
@@ -836,18 +839,30 @@
   }
   function axisLock(el) { if (Math.abs(el.w) > Math.abs(el.h)) el.h = 0; else el.w = 0; }
 
+  /* 拖拉格線規則（兩種表格一致）：
+     欄：中間格線＝左右兩欄互讓（總寬不變）；最右外框＝改總寬（接在一起的說明表一起變）。
+     列：說明表只改該列（表格往下長）；左側說明欄等一般表格與下一列互讓（外框高度不變），Shift＝只改該列。
+     字高都不變，放不下就換行加高。 */
   function dragDivider(d, dx, dy) {
     var el = d.el, o = d.orig, dir = d.d.dir, i = d.d.i;
     if (dir === 'col') {
       var cols = o.cols.slice(), delta = dx;
       if (i < cols.length - 1 && !d.shift) {
-        delta = Math.max(1 - cols[i], Math.min(cols[i + 1] - 1, delta));
+        delta = Math.max(3 - cols[i], Math.min(cols[i + 1] - 3, delta));
         cols[i] += delta; cols[i + 1] -= delta;
-      } else cols[i] = Math.max(1, cols[i] + delta);
+      } else {
+        cols[i] = Math.max(3, cols[i] + delta);
+        // 下表的外框跟著上表：改上表最後一欄
+        if (el.matchWidth && el.stackBelow) {
+          var up = elById(el.stackBelow);
+          if (up && up.cols && d.upOrig) { up.cols = d.upOrig.slice(); up.cols[up.cols.length - 1] = round(Math.max(3, up.cols[up.cols.length - 1] + delta), 2); }
+        }
+      }
       el.cols = cols.map(function (c) { return round(c, 2); });
       return;
     }
     var tmo = R.tableModel(o, App.P), rows = (el.type === 'table' ? o.rows : tmo.rows).slice(), dl = dy;   // 一般表格以設定列高為準（不含自動撐高）
+    if (el.type === 'ftable') { setRowH(el, tmo, i, Math.max(3, rows[i] + dl)); return; }
     if (i < rows.length - 1 && !d.shift) {
       dl = Math.max(1 - rows[i], Math.min(rows[i + 1] - 1, dl));
       rows[i] += dl; rows[i + 1] -= dl;
@@ -1621,7 +1636,10 @@
       field('資料列高(預設)', inp('rowH', el.rowH, 'number', 'step="0.1"')) + field('內容字高', inp('dataFs', el.dataFs, 'number', 'step="0.05"')) +
       field('附註列高（0=不顯示）', inp('notesH', el.notesH, 'number', 'step="0.1" min="0"')) + field('附註字高', inp('notesFs', el.notesFs, 'number', 'step="0.05"')) +
       field('面積小數位', inp('decimals', el.decimals, 'number', 'step="1" min="0" max="4"')) + field('框線寬', inp('lw', el.lw == null ? 0.24 : el.lw, 'number', 'step="0.01"')) + '</div>';
-    h += '<label class="inline">' + chk('autoRowH', el.autoRowH) + ' 資料列高自動配合文字（文字多時自動換行、列變高；不勾＝字縮小塞進固定列高）</label>';
+    h += '<label class="inline">' + chk('autoRowH', el.autoRowH !== false) + ' 資料列高自動配合文字（文字多時自動換行、列變高；不勾＝字縮小塞進固定列高）</label>';
+    var otherT = App.P.elements.filter(function (e) { return e.type === 'ftable' && e.id !== el.id; })[0];
+    if (otherT && !el.stackBelow && !otherT.stackBelow) h += '<div class="btnrow">' + btn('stackJoin', '接到「' + R.esc(otherT.name || '說明表') + '」下方（同寬、附註合併）') + '</div>';
+    if (el.stackBelow) h += '<div class="btnrow">' + btn('stackSplit', '與上方表格分開') + '</div>';
     h += '<div class="sec">欄位（可增減、調整順序）</div><table class="flist cols"><thead><tr><th>內容</th><th>表頭文字（\\n 換行）</th><th>寬</th><th>字高</th><th></th></tr></thead><tbody>';
     el.columns.forEach(function (c, i) {
       h += '<tr data-ci="' + i + '"><td><select data-col="key">' + FT_KEYS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === c.key ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td>' +
@@ -1701,6 +1719,15 @@
       if (act === 'rowsUniform') el.rowHs = {};
       if (act === 'colAdd') { el.columns.push({ key: 'note', header: '備註' }); el.cols.push(18); }
       if (act === 'tstyle') applyTableStyle(el, arguments[2] && arguments[2].value);
+      if (act === 'stackJoin') {
+        var up = App.P.elements.filter(function (e) { return e.type === 'ftable' && e.id !== el.id; })[0];
+        if (up) {
+          el.stackBelow = up.id; el.stackGap = 0; el.matchWidth = true;
+          if (up.notesH > 0) { el.notes = el.notes || up.notes; el.notesH = Math.max(el.notesH || 0, up.notesH); el.notesFs = up.notesFs; up.notesH = 0; }
+          layoutStacked();
+        }
+      }
+      if (act === 'stackSplit') { delete el.stackBelow; delete el.matchWidth; el.y = round(el.y + 6, 2); }
     }
     if (el.type === 'map') {
       if (act === 'centerCase') centerMap(el, 'case') || toast('沒有案件線');
@@ -1771,21 +1798,30 @@
     var hv = presentOvs(), blocks = ['case', 'split'].filter(function (k) { return hv[k] || ovFeatures(k).length; });
     if (!blocks.length) blocks = [act];
     var two = blocks.length > 1;
-    var LC = P.settings.flistCols || ['landNo', 'note'], LN = { landNo: '地號', note: '備註', owner: '所有權人', extra: '其他' };
+    var LN = { landNo: '地號', note: '備註', owner: '所有權人', extra: '其他' };
+    // 每一層的輸入欄位＝該層說明表的欄位（編號、面積以外）
+    function blockCols(ov) {
+      var ft = P.elements.filter(function (e) { return e.type === 'ftable' && e.ov === ov; })[0] || P.elements.filter(function (e) { return e.type === 'ftable' && !e.ov; })[0];
+      var cs = ft ? (ft.columns || []).filter(function (c) { return c.key !== 'code' && c.key !== 'area'; }).map(function (c) {
+        return { key: c.key, name: String(c.header || LN[c.key] || c.key).replace(/\n.*$/, '').replace(/[:：\s]/g, '') || LN[c.key] };
+      }) : [];
+      return cs.length ? cs.slice(0, 3) : [{ key: 'landNo', name: '地號' }, { key: 'note', name: '備註' }];
+    }
     h += '<div class="btnrow">' + btn('toolFace', '點選成面 (F)', 'primary') + btn('toolMark', '標號 (M)') + btn('toolPoly', '手繪多邊形 (P)') + '</div>';
     if (two) h += '<p class="small">現況與分割各一張表、編號各自計算。點區塊標題切換「新增到哪一層」（同頂端「編輯」）。</p>';
     blocks.forEach(function (ov) {
       var list = ovFeatures(ov), total = 0, on = ov === act;
       if (two) h += '<div class="fblock' + (on ? ' on' : '') + '"><div class="fbhead" data-ov="' + ov + '"><b>' + (ov === 'split' ? '分割（分割方案說明）' : '現況（地上物說明）') + '</b>' +
         (on ? '<span class="tag">新增到這裡</span>' : '<span class="small">點這裡切換</span>') + '</div>';
-      h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th><th>' + LN[LC[0]] + '</th><th>' + LN[LC[1]] + '</th><th></th></tr></thead><tbody>';
+      var BC = blockCols(ov);
+      h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th>' + BC.map(function (c) { return '<th>' + R.esc(c.name) + '</th>'; }).join('') + '<th></th></tr></thead><tbody>';
       list.forEach(function (f) {
         var a = parseFloat(R.featureArea(f, 2)) || 0; total += a;
         var sel2 = App.sel && App.sel.id === f.id ? ' class="on"' : '';
         var calc = f.pt || !f.pts || f.pts.length < 3 ? '' : (G.area(f.pts) + (f.arcAdj || 0)).toFixed(2);
         h += '<tr data-fid="' + f.id + '"' + sel2 + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td>' +
           '<td><input data-f="areaOverride" class="num" placeholder="' + calc + '" value="' + R.esc(f.areaOverride == null ? '' : f.areaOverride) + '" title="空白＝系統計算值；可直接輸入內網計算系統的面積"></td>' +
-          '<td><input data-f="' + LC[0] + '" value="' + R.esc(f[LC[0]] || '') + '"></td><td><input data-f="' + LC[1] + '" value="' + R.esc(f[LC[1]] || '') + '"></td>' +
+          BC.map(function (c) { return '<td><input data-f="' + c.key + '" value="' + R.esc(f[c.key] || '') + '"></td>'; }).join('') +
           '<td class="ops"><label class="reg" title="列入清冊（圖上表格不列，改寫「詳如清冊」）"><input type="checkbox" data-reg="' + f.id + '"' + (f.inRegister ? ' checked' : '') + '>冊</label><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
       });
       h += '</tbody></table>';
@@ -1796,9 +1832,7 @@
         '<button data-recode="' + ov + '">重新編號</button><button data-addrow="' + ov + '" title="只在說明表加一列（不在圖上）">＋空白列</button></div>';
       if (two) h += '</div>';
     });
-    h += '<p class="small">面積欄空白＝系統計算值（灰字），可直接填入內網計算系統的面積。清單欄位：' +
-      '<select id="flc0">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[0] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select>' +
-      '<select id="flc1">' + Object.keys(LN).map(function (k) { return '<option value="' + k + '"' + (k === LC[1] ? ' selected' : '') + '>' + LN[k] + '</option>'; }).join('') + '</select></p>';
+    h += '<p class="small">面積欄空白＝系統計算值（灰字），可直接填入內網計算系統的面積。輸入欄位跟著說明表的欄位走（在說明表屬性改「表格樣式」或欄位）。</p>';
     var FR = P.settings.faceRoles || { parcel: true, other: false };
     h += '<details class="fold"><summary>點選成面設定</summary><div class="btnrow">' +
       '<label class="inline"><input type="checkbox" data-fr="parcel"' + (FR.parcel !== false ? ' checked' : '') + '>地籍線當邊界</label>' +
@@ -1808,7 +1842,6 @@
     box.innerHTML = h;
     $$('[data-fr]', box).forEach(function (c) { c.onchange = function () { P.settings.faceRoles = Object.assign({}, FR); P.settings.faceRoles[c.dataset.fr] = c.checked; changed(); }; });
     $$('[data-scheme]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.scheme].codeScheme = c.value; changed(); }; });
-    ['flc0', 'flc1'].forEach(function (id, i) { $('#' + id, box).onchange = function () { var lc = LC.slice(); lc[i] = this.value; P.settings.flistCols = lc; renderFeatTab(); }; });
     $('#regArea', box).onchange = function () { P.settings.regArea = this.value; changed(); };
     $$('input[data-f]', box).forEach(function (i) {
       i.addEventListener('input', function () {

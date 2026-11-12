@@ -350,7 +350,7 @@
         var numeric = col.key === 'code' || col.key === 'area';   // 編號、面積不換行（太長就縮小）
         var cell = { r: r, c: c, text: txt, align: col.align || 'center', valign: 'middle', fs: fs, fit: (!autoF || numeric) ? 'shrink' : '', fid: f.id, lh: LH };
         cellsF.push(cell);
-        if (autoF && !numeric && txt) nd = Math.max(nd, needH(txt, el.cols[c] || 10, fs, 'kai', LH));
+        if (autoF && txt) nd = Math.max(nd, numeric ? fs * LH + 1.6 : needH(txt, el.cols[c] || 10, fs, 'kai', LH));
       });
       rowsF.push(autoF ? Math.max(base, Math.round(nd * 100) / 100) : base); kinds.push(f.id);
     });

@@ -209,3 +209,5 @@ label.reg input { vertical-align: middle; }
 .regdoc thead { display: table-header-group; }
 .regdoc tr { page-break-inside: avoid; }
 .regdoc .regnote { font-size: 10pt; margin-top: 3mm; }
+
+table.flist td input { min-width: 0; width: 100%; }
