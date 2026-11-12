@@ -92,6 +92,13 @@ const path = require('path');
   q = await toScreen(mp.x + 0.5 + 6, mp.y + mp.h * 0.3); await pg.mouse.move(q[0], q[1], { steps: 5 }); await pg.mouse.up();
   const mp3 = await pg.evaluate(() => { const m = App.P.elements.find(e => e.type === 'map'); return { x: m.x, cx: m.cx }; });
   check('拖框線＝移動略圖框 (x ' + mp.x + '→' + mp3.x + ')', Math.abs(mp3.x - mp.x - 6) < 1.5 && mp3.cx === mp2.cx);
+  // 8d) 8K 自動框選
+  await pg.evaluate(() => { App.P.elements = App.P.elements.filter((e, i, a) => !(e.type === 'map' && a.filter(x => x.type === 'map').indexOf(e) > 0)); App.P.output.k8.region = null; });
+  await pg.click('.tabs [data-tab=out]');
+  check('8K 輸出頁沒有直橫互換、框選目前元件', !(await pg.isVisible('[data-act=swap8k]')) && !(await pg.isVisible('[data-act=regionSel]')));
+  await pg.click('[data-act=regionAuto]');
+  const rg = await pg.evaluate(() => { const r = App.P.output.k8.region, m = App.P.elements.find(e => e.type === 'map'), fr = App.P.elements.find(e => e.type === 'rect'); return { r, mapR: m.x + m.w, mapB: m.y + m.h, frR: fr.x + fr.w, frT: fr.y }; });
+  check('8K 自動框選（說明欄右緣→外框右緣、外框頂→略圖底） ' + JSON.stringify(rg), Math.abs(rg.r.x - 77.7) < 0.5 && rg.r.y <= rg.frT + 0.01 && Math.abs(rg.r.x + rg.r.w - Math.max(rg.mapR, rg.frR)) < 0.05 && Math.abs(rg.r.y + rg.r.h - rg.mapB - 2.5) < 0.05);
   // 9) 列印按鈕
   await pg.click('#toolbar [data-cmd=printA3]'); await pg.waitForTimeout(200);
   check('print A3 builds page', (await pg.evaluate(() => window.__printed)) > 1000);

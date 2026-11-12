@@ -2034,8 +2034,9 @@
       h += '<div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
         field('範圍寬', inp('output.k8.region.w', o.region.w, 'number', 'step="0.1"')) + field('範圍高', inp('output.k8.region.h', o.region.h, 'number', 'step="0.1"')) + '</div>';
     } else h += '<p class="small">尚未設定範圍。</p>';
-    h += '<div class="btnrow">' + btn('region', '滑鼠框選範圍 (R)') + btn('regionFt', '框選：說明表') + btn('regionSel', '框選：目前選取元件') + '</div>';
-    h += '<div class="btnrow">' + btn('swap8k', '8K 直/橫互換') + btn('print8k', '列印 8K 套印', 'primary') + '</div>';
+    h += '<div class="btnrow">' + btn('regionAuto', '自動框選（說明表＋略圖）') + btn('region', '滑鼠框選 (R)') + '</div>';
+    h += '<div class="btnrow">' + btn('print8k', '列印 8K 套印', 'primary') + '</div>';
+    h += '<p class="small">自動框選＝左側說明欄右邊到外框右緣、外框頂端到略圖／說明表底部（不含主任、日期）。沒有框選時，列印 8K 會自動套用。</p>';
     h += '<div class="sec">③ 送審核定後</div>';
     h += '<p class="small">於「案件資料」填入核定日期（右下角「中華民國　年　月　日」自動帶入），再列印 A3。份數請在列印視窗設定' + (P.fields.copies ? '：本案 <b>' + R.esc(P.fields.copies) + '</b> 份' : '') + '。</p>';
     h += '<div class="sec">列印注意</div><p class="small">列印視窗請選：目的地＝印表機或「另存為 PDF」、紙張＝A3（8K 用自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設/100%</b>，並勾選「背景圖形」。若印表機有固定偏移，可用上方「印表位移」校正。</p>';
@@ -2046,15 +2047,9 @@
       var a = ev.target.closest('[data-act]'); if (!a) return;
       var act = a.dataset.act;
       if (act === 'printA3') { checkpoint(); Printer.printA3(P, App.cad); }
-      if (act === 'print8k') { checkpoint(); if (!Printer.print8K(P, App.cad)) toast('請先框選 8K 套印範圍'); }
+      if (act === 'print8k') { if (!o.region) autoRegion(); checkpoint(); if (!Printer.print8K(P, App.cad)) toast('請先框選 8K 套印範圍'); }
       if (act === 'region') setTool('region');
-      if (act === 'swap8k') { var t = o.w; o.w = o.h; o.h = t; renderOutTab(); changed(); }
-      if (act === 'regionFt' || act === 'regionSel') {
-        var el = act === 'regionFt' ? P.elements.filter(function (e) { return e.type === 'ftable'; })[0] : (App.sel && App.sel.kind === 'el' ? elById(App.sel.id) : null);
-        if (!el) return toast(act === 'regionFt' ? '沒有說明表' : '請先選取元件');
-        var b = R.bounds(el, P); o.region = { x: round(b.x - 1, 2), y: round(b.y - 1, 2), w: round(b.w + 2, 2), h: round(b.h + 2, 2) };
-        renderOutTab(); render(); changed();
-      }
+      if (act === 'regionAuto') { if (autoRegion()) { renderOutTab(); render(); changed(); toast('已自動框選 8K 套印範圍'); } else toast('找不到說明表或略圖'); }
       if (act === 'saveTpl') saveTemplate();
       if (act === 'exportTpl') download('略圖範本.ctt', JSON.stringify(templateData()), 'application/json');
       if (act === 'importTpl') pickFiles('.ctt,.json').then(function (fs) {
@@ -2108,6 +2103,24 @@
     if (P.planIdx > i) P.planIdx--;
     App.undo = []; App.redo = []; App.lastSnap = snap();
     renderPlanSel(); autosave();
+  }
+
+  /* 8K 套印範圍：左側說明欄右緣 → 外框右緣；外框頂端 → 略圖、說明表、指北針的最底部（不含主任、日期） */
+  function autoRegion() {
+    var P = App.P, B = function (e) { return R.bounds(e, P); };
+    var parts = P.elements.filter(function (e) { return !e.hidden && (e.type === 'map' || e.type === 'ftable' || e.type === 'north'); });
+    if (!parts.length) return false;
+    var frame = P.elements.filter(function (e) { return e.type === 'rect' && !e.hidden; }).sort(function (a, b) { return b.w * b.h - a.w * a.h; })[0];
+    var left = P.elements.filter(function (e) { return e.type === 'table' && !e.hidden; })[0];
+    var pb = parts.map(B), minX = Math.min.apply(null, pb.map(function (b) { return b.x; })), minY = Math.min.apply(null, pb.map(function (b) { return b.y; }));
+    var maxX = Math.max.apply(null, pb.map(function (b) { return b.x + b.w; })), maxY = Math.max.apply(null, pb.map(function (b) { return b.y + b.h; }));
+    var x0 = left ? B(left).x + B(left).w : (frame ? frame.x : minX - 2);
+    if (x0 > minX) x0 = minX - 2;
+    var x1 = frame ? Math.max(frame.x + frame.w, maxX) : maxX + 2;
+    var y0 = frame ? Math.min(frame.y, minY) : minY - 2;
+    var y1 = maxY + 2.5;
+    P.output.k8.region = { x: round(x0, 2), y: round(y0, 2), w: round(x1 - x0, 2), h: round(y1 - y0, 2) };
+    return true;
   }
 
   /* ---------- 範本 ---------- */
@@ -2293,7 +2306,7 @@
       else if (c === 'fit') fitView(); else if (c === 'zin' || c === 'zout') { App.view.z *= c === 'zin' ? 1.25 : 0.8; render(); }
       else if (c === 'z100') { var r = stage.getBoundingClientRect(), cx = App.view.ox + r.width / App.view.z / 2, cy = App.view.oy + r.height / App.view.z / 2; App.view.z = 96 / 25.4; App.view.ox = cx - r.width / App.view.z / 2; App.view.oy = cy - r.height / App.view.z / 2; render(); }
       else if (c === 'printA3') { checkpoint(); Printer.printA3(App.P, App.cad); }
-      else if (c === 'print8k') { checkpoint(); if (!Printer.print8K(App.P, App.cad)) { toast('請先框選 8K 套印範圍'); switchTab('out'); } }
+      else if (c === 'print8k') { if (!App.P.output.k8.region) autoRegion(); checkpoint(); if (!Printer.print8K(App.P, App.cad)) { toast('請先框選 8K 套印範圍'); switchTab('out'); } }
       else if (c.indexOf('add-') === 0) addElement(c.slice(4));
       else if (c === 'help') $('#dlgHelp').showModal();
       else if (c === 'planAdd') addPlan(); else if (c === 'planRen') renamePlan(); else if (c === 'planDel') deletePlan();
