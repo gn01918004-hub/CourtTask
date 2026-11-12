@@ -1154,6 +1154,8 @@
         el.merges = (el.merges || []).filter(function (mg) { var r0 = kinds.indexOf(mg.fid); return !(r0 <= g.r1 && r0 + (mg.n || 1) - 1 >= g.r0 && mg.c <= g.c1 && mg.c + (mg.cs || 1) - 1 >= g.c0); });
       } });
     }
+    var pr2 = el.type === 'ftable' ? ftPair() : null;
+    if (pr2) rows.push(pr2.joined ? { item: '兩張說明表分開擺放', fn: function () { joinFtables(false); } } : { item: '兩張說明表接在一起（同寬）', fn: function () { joinFtables(true); } });
     rows.push({ item: '編輯表格（拉格線、Shift 多選）', fn: function () { setTableEdit(el.id); } });
   }
   function closeCtx() { var c = $('#ctx'); if (c) { c.hidden = true; c.innerHTML = ''; } }
@@ -1601,6 +1603,27 @@
     if (!el.titleH && st.title) el.titleH = 13.3;
   }
   /* 同時有現況與分割的說明項目時，自動分成兩張說明表：地上物說明（現況）、分割方案說明（分割） */
+  /* 兩張說明表接在一起（同寬、附註只放下面）或分開擺放 */
+  function ftPair() {
+    var fts = App.P.elements.filter(function (e) { return e.type === 'ftable'; });
+    if (fts.length < 2) return null;
+    var lower = fts.filter(function (e) { return e.ov === 'split'; })[0] || fts[1];
+    var upper = fts.filter(function (e) { return e !== lower && (e.ov === 'case' || !e.ov); })[0] || fts.filter(function (e) { return e !== lower; })[0];
+    return { upper: upper, lower: lower, joined: lower.stackBelow === upper.id };
+  }
+  function joinFtables(on) {
+    var pr = ftPair(); if (!pr) return;
+    var up = pr.upper, el = pr.lower;
+    if (on) {
+      el.stackBelow = up.id; el.stackGap = 0; el.matchWidth = true;
+      if (up.notesH > 0) { el.notes = el.notes || up.notes; el.notesH = Math.max(el.notesH || 0, up.notesH); el.notesFs = up.notesFs; up.notesH = 0; }
+      layoutStacked();
+    } else if (pr.joined) {
+      delete el.stackBelow; delete el.matchWidth; el.y = round(el.y + 6, 2);
+      if (!up.notesH && el.notesH) { up.notes = el.notes; up.notesH = el.notesH; up.notesFs = el.notesFs; }
+    }
+    changed(); render(); renderProps(); if (App.tab === 'feat') renderFeatTab();
+  }
   function ensureSplitTables() {
     var P = App.P, has = { case: false, split: false };
     P.features.forEach(function (f) { has[f.ov || 'case'] = true; });
@@ -1638,8 +1661,8 @@
       field('面積小數位', inp('decimals', el.decimals, 'number', 'step="1" min="0" max="4"')) + field('框線寬', inp('lw', el.lw == null ? 0.24 : el.lw, 'number', 'step="0.01"')) + '</div>';
     h += '<label class="inline">' + chk('autoRowH', el.autoRowH !== false) + ' 資料列高自動配合文字（文字多時自動換行、列變高；不勾＝字縮小塞進固定列高）</label>';
     var otherT = App.P.elements.filter(function (e) { return e.type === 'ftable' && e.id !== el.id; })[0];
-    if (otherT && !el.stackBelow && !otherT.stackBelow) h += '<div class="btnrow">' + btn('stackJoin', '接到「' + R.esc(otherT.name || '說明表') + '」下方（同寬、附註合併）') + '</div>';
-    if (el.stackBelow) h += '<div class="btnrow">' + btn('stackSplit', '與上方表格分開') + '</div>';
+    var pr3 = ftPair();
+    if (pr3) h += '<div class="seg2"><span>兩張說明表</span><button data-act="stackJoin" class="' + (pr3.joined ? 'on' : '') + '">接在一起</button><button data-act="stackSplit" class="' + (pr3.joined ? '' : 'on') + '">分開擺放</button></div>';
     h += '<div class="sec">欄位（可增減、調整順序）</div><table class="flist cols"><thead><tr><th>內容</th><th>表頭文字（\\n 換行）</th><th>寬</th><th>字高</th><th></th></tr></thead><tbody>';
     el.columns.forEach(function (c, i) {
       h += '<tr data-ci="' + i + '"><td><select data-col="key">' + FT_KEYS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === c.key ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td>' +
@@ -1719,15 +1742,8 @@
       if (act === 'rowsUniform') el.rowHs = {};
       if (act === 'colAdd') { el.columns.push({ key: 'note', header: '備註' }); el.cols.push(18); }
       if (act === 'tstyle') applyTableStyle(el, arguments[2] && arguments[2].value);
-      if (act === 'stackJoin') {
-        var up = App.P.elements.filter(function (e) { return e.type === 'ftable' && e.id !== el.id; })[0];
-        if (up) {
-          el.stackBelow = up.id; el.stackGap = 0; el.matchWidth = true;
-          if (up.notesH > 0) { el.notes = el.notes || up.notes; el.notesH = Math.max(el.notesH || 0, up.notesH); el.notesFs = up.notesFs; up.notesH = 0; }
-          layoutStacked();
-        }
-      }
-      if (act === 'stackSplit') { delete el.stackBelow; delete el.matchWidth; el.y = round(el.y + 6, 2); }
+      if (act === 'stackJoin') joinFtables(true);
+      if (act === 'stackSplit') joinFtables(false);
     }
     if (el.type === 'map') {
       if (act === 'centerCase') centerMap(el, 'case') || toast('沒有案件線');
@@ -1809,12 +1825,15 @@
     }
     h += '<div class="btnrow">' + btn('toolFace', '點選成面 (F)', 'primary') + btn('toolMark', '標號 (M)') + btn('toolPoly', '手繪多邊形 (P)') + '</div>';
     if (two) h += '<p class="small">現況與分割各一張表、編號各自計算。點區塊標題切換「新增到哪一層」（同頂端「編輯」）。</p>';
+    var pair = ftPair();
+    if (pair) h += '<div class="seg2"><span>兩張說明表</span><button data-join="1" class="' + (pair.joined ? 'on' : '') + '">接在一起（同寬）</button><button data-join="0" class="' + (pair.joined ? '' : 'on') + '">分開擺放</button></div>';
     blocks.forEach(function (ov) {
       var list = ovFeatures(ov), total = 0, on = ov === act;
       if (two) h += '<div class="fblock' + (on ? ' on' : '') + '"><div class="fbhead" data-ov="' + ov + '"><b>' + (ov === 'split' ? '分割（分割方案說明）' : '現況（地上物說明）') + '</b>' +
         (on ? '<span class="tag">新增到這裡</span>' : '<span class="small">點這裡切換</span>') + '</div>';
       var BC = blockCols(ov);
-      h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th>' + BC.map(function (c) { return '<th>' + R.esc(c.name) + '</th>'; }).join('') + '<th></th></tr></thead><tbody>';
+      var regOn = !!((P.settings.regOn || {})[ov]) || list.some(function (f) { return f.inRegister; });
+      h += '<table class="flist"><thead><tr><th>編號</th><th>面積 m²</th>' + BC.map(function (c) { return '<th>' + R.esc(c.name) + '</th>'; }).join('') + (regOn ? '<th class="regc">列印成<br>清冊</th>' : '') + '<th></th></tr></thead><tbody>';
       list.forEach(function (f) {
         var a = parseFloat(R.featureArea(f, 2)) || 0; total += a;
         var sel2 = App.sel && App.sel.id === f.id ? ' class="on"' : '';
@@ -1822,14 +1841,16 @@
         h += '<tr data-fid="' + f.id + '"' + sel2 + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td>' +
           '<td><input data-f="areaOverride" class="num" placeholder="' + calc + '" value="' + R.esc(f.areaOverride == null ? '' : f.areaOverride) + '" title="空白＝系統計算值；可直接輸入內網計算系統的面積"></td>' +
           BC.map(function (c) { return '<td><input data-f="' + c.key + '" value="' + R.esc(f[c.key] || '') + '"></td>'; }).join('') +
-          '<td class="ops"><label class="reg" title="列入清冊（圖上表格不列，改寫「詳如清冊」）"><input type="checkbox" data-reg="' + f.id + '"' + (f.inRegister ? ' checked' : '') + '>冊</label><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
+          (regOn ? '<td class="regc"><input type="checkbox" data-reg="' + f.id + '"' + (f.inRegister ? ' checked' : '') + ' title="列印成清冊（圖上表格不列，改寫「詳如清冊」）"></td>' : '') +
+          '<td class="ops"><button data-fop="up" title="上移">↑</button><button data-fop="down" title="下移">↓</button><button data-fop="del" title="刪除">✕</button></td></tr>';
       });
       h += '</tbody></table>';
       var nReg = list.filter(function (f) { return f.inRegister; }).length;
-      h += '<div class="btnrow"><span class="small">勾「冊」＝列入清冊' + (nReg ? '（已勾 ' + nReg + ' 筆）' : '') + '</span>' + (nReg ? '<button data-regprint="' + ov + '">列印清冊</button><button data-regcsv="' + ov + '">清冊 CSV</button>' : '') + '</div>';
+      if (regOn) h += '<div class="btnrow"><span class="small">勾選的項目會列印成清冊' + (nReg ? '（已勾 ' + nReg + ' 筆）' : '') + '</span>' + (nReg ? '<button data-regprint="' + ov + '">列印清冊</button><button data-regcsv="' + ov + '">清冊 CSV</button>' : '') + '</div>';
       h += '<div class="btnrow"><span class="small">合計 ' + total.toFixed(2) + ' m²（' + list.length + ' 筆）　編號</span>' +
         '<select data-scheme="' + ov + '">' + [['alpha', 'A、B、C…'], ['stem', '甲、乙、丙…'], ['num', '1、2、3…']].map(function (o) { return '<option value="' + o[0] + '"' + (ovScheme(ov) === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
         '<button data-recode="' + ov + '">重新編號</button><button data-addrow="' + ov + '" title="只在說明表加一列（不在圖上）">＋空白列</button></div>';
+      h += '<label class="inline small"><input type="checkbox" data-regon="' + ov + '"' + (regOn ? ' checked' : '') + '> 啟用清冊（項目太多、一張圖放不下時）</label>';
       if (two) h += '</div>';
     });
     h += '<p class="small">面積欄空白＝系統計算值（灰字），可直接填入內網計算系統的面積。輸入欄位跟著說明表的欄位走（在說明表屬性改「表格樣式」或欄位）。</p>';
@@ -1851,7 +1872,13 @@
       i.addEventListener('focus', function () { var f = featById(i.closest('tr').dataset.fid); App.sel = { kind: 'feature', id: f.id, mapId: (maps()[0] || {}).id }; renderProps(); render(); });
     });
     $$('[data-reg]', box).forEach(function (c) { c.onchange = function () { featById(c.dataset.reg).inRegister = c.checked; changed(); render(); renderFeatTab(); }; });
+    $$('[data-regon]', box).forEach(function (c) { c.onchange = function () {
+      var ov3 = c.dataset.regon; P.settings.regOn = Object.assign({}, P.settings.regOn || {}); P.settings.regOn[ov3] = c.checked;
+      if (!c.checked) ovFeatures(ov3).forEach(function (f) { delete f.inRegister; });   // 關閉＝全部放回圖上表格
+      changed(); render(); renderFeatTab();
+    }; });
     box.onclick = function (ev) {
+      var jn = ev.target.closest('[data-join]'); if (jn) { joinFtables(jn.dataset.join === '1'); return; }
       var hd = ev.target.closest('.fbhead[data-ov]'); if (hd) { setActiveOv(hd.dataset.ov); return; }
       var rp = ev.target.closest('[data-regprint],[data-regcsv]');
       if (rp) {

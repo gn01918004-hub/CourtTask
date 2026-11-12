@@ -67,6 +67,8 @@ const OUT = process.argv[2];
   // 清冊：勾一筆分割項目列入清冊 → 圖上表格少一筆、多「詳如清冊」列；CSV 有該筆
   await pg.click('.tabs [data-tab=feat]');
   const regId = await pg.evaluate(() => App.P.features.find(f => f.ov === 'split').id);
+  check('清冊欄平時不顯示', !(await pg.isVisible('[data-reg="' + regId + '"]')));
+  await pg.check('[data-regon=split]');
   await pg.check('[data-reg="' + regId + '"]');
   const rg = await pg.evaluate((id) => {
     const ft = App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split'), tm = Render.tableModel(ft, App.P);
@@ -75,6 +77,13 @@ const OUT = process.argv[2];
   }, regId);
   check('清冊：圖上表格改寫「詳如清冊」、CSV 有資料 ' + JSON.stringify(rg), !rg.inTable && rg.regRow && rg.csv);
   await pg.uncheck('[data-reg="' + regId + '"]');
+  await pg.uncheck('[data-regon=split]');
+  // 說明頁最上方的「兩張說明表：接在一起／分開擺放」
+  await pg.click('#tab-feat [data-join="0"]');
+  const j0 = await pg.evaluate(() => !!App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split').stackBelow);
+  await pg.click('#tab-feat [data-join="1"]');
+  const j1 = await pg.evaluate(() => !!App.P.elements.find(e => e.type === 'ftable' && e.ov === 'split').stackBelow);
+  check('說明頁切換兩張表接在一起／分開 ' + [j0, j1], j0 === false && j1 === true);
   // 說明頁：分割區塊的輸入欄位＝所有權人；現況區塊＝地號、備註
   await pg.click('.tabs [data-tab=feat]');
   const heads = await pg.evaluate(() => Array.from(document.querySelectorAll('#tab-feat .fblock')).map(b => Array.from(b.querySelectorAll('thead th')).map(t => t.textContent).join('/')));

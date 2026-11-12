@@ -211,3 +211,12 @@ label.reg input { vertical-align: middle; }
 .regdoc .regnote { font-size: 10pt; margin-top: 3mm; }
 
 table.flist td input { min-width: 0; width: 100%; }
+
+table.flist td input[type=checkbox] { width: auto; }
+table.flist .regc { text-align: center; font-size: 11px; white-space: nowrap; }
+.seg2 { display: flex; align-items: center; gap: 0; margin: 6px 0 8px; }
+.seg2 > span { font-size: 12px; color: var(--muted); margin-right: 8px; }
+.seg2 button { border-radius: 0; margin-left: -1px; }
+.seg2 button:nth-of-type(1) { border-radius: 5px 0 0 5px; }
+.seg2 button:last-child { border-radius: 0 5px 5px 0; }
+.seg2 button.on { background: var(--accent); color: #fff; border-color: var(--accent); position: relative; z-index: 1; }
