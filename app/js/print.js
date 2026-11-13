@@ -11,7 +11,15 @@
     st.textContent = '@page{size:' + pageW + 'mm ' + pageH + 'mm;margin:0}';
     area.innerHTML = '<div class="printPage" style="width:' + pageW + 'mm;height:' + pageH + 'mm">' + svgHtml + '</div>';
     // 等字型與版面就緒再列印
-    setTimeout(function () { window.print(); }, 60);
+    setTimeout(function () { withTitle(function () { window.print(); }); }, 60);
+  }
+  /* 列印期間把網頁標題換成專案名稱：「另存為 PDF」的預設檔名就是它，方便歸檔 */
+  function withTitle(fn) {
+    var old = document.title, t = global.Printer.titleFn ? global.Printer.titleFn() : '';
+    if (t) document.title = t;
+    try { fn(); } finally {
+      if (t) setTimeout(function () { if (document.title !== t) return; if (global.Printer.titleRestore) global.Printer.titleRestore(); else document.title = old; }, 500);
+    }
   }
 
   /* A3 全張 1:1 */
@@ -23,18 +31,31 @@
   function printA3(P, cad) { doPrint(P.sheet.w, P.sheet.h, sheetSVG(P, cad)); }
 
   /* 8K 套印：框選區域以 1:1 放在紙張左下角 (offX, offY) 處 */
+  /* 8K 紙張方向：範圍（含左下平移）直式放不下、橫式放得下時，自動改用橫式。
+     回傳 { w, h, swapped, fits, overW, overH }（overW/overH＝超出紙張的 mm） */
+  function k8Page(P) {
+    var o = P.output.k8, r = o.region, w = +o.w || 267, h = +o.h || 388;
+    if (!r) return { w: w, h: h, swapped: false, fits: true, overW: 0, overH: 0 };
+    var needW = r.w + (+o.offX || 0), needH = r.h + (+o.offY || 0), E = 0.05;
+    var fit = function (pw, ph) { return needW <= pw + E && needH <= ph + E; };
+    var swapped = !fit(w, h) && fit(h, w);
+    if (swapped) { var t = w; w = h; h = t; }
+    return { w: w, h: h, swapped: swapped, fits: fit(w, h), overW: Math.max(0, needW - w), overH: Math.max(0, needH - h) };
+  }
   function regionSVG(P, cad) {
     var o = P.output.k8, r = o.region;
     if (!r || r.w <= 0 || r.h <= 0) return null;
+    var pg = k8Page(P);
     var left = (+o.offX || 0) + (+o.dx || 0);
-    var top = o.h - (+o.offY || 0) - r.h + (+o.dy || 0);
+    var top = pg.h - (+o.offY || 0) - r.h + (+o.dy || 0);
     return '<svg xmlns="http://www.w3.org/2000/svg" width="' + n(r.w) + 'mm" height="' + n(r.h) + 'mm" viewBox="' + n(r.x) + ' ' + n(r.y) + ' ' + n(r.w) + ' ' + n(r.h) +
       '" style="position:absolute;left:' + n(left) + 'mm;top:' + n(top) + 'mm;overflow:hidden">' + R.renderSheet(P, cad, { print: true }) + '</svg>';
   }
   function print8K(P, cad) {
     var s = regionSVG(P, cad);
     if (!s) return false;
-    doPrint(P.output.k8.w, P.output.k8.h, s);
+    var pg = k8Page(P);
+    doPrint(pg.w, pg.h, s);
     return true;
   }
 
@@ -59,6 +80,7 @@
     P.features.forEach(function (f) {
       var pts = f.pts && f.pts.length >= 3 ? G.clipPoly(f.pts, v.X0, v.Y0, v.X1, v.Y1) : [];
       if (pts.length >= 3) w.poly('FEATURE', pts, true);
+      (f.holes || []).forEach(function (h) { var hp = G.clipPoly(h, v.X0, v.Y0, v.X1, v.Y1); if (hp.length >= 3) w.poly('FEATURE', hp, true); });
       var lp = LY.feat[f.id] || f.labelAt || R.featAnchor(f);
       if (!lp || lp[0] < v.X0 || lp[0] > v.X1 || lp[1] < v.Y0 || lp[1] > v.Y1) return;
       w.text('FEATURE_TXT', lp[0], lp[1], 2.5, f.code, { center: true });
@@ -90,15 +112,19 @@
       d.rows.map(function (r) { return '<tr>' + r.map(function (v) { return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>' +
       '<p class="regnote">' + esc(global.Model.fill(ft.notes || '', F)).replace(/\n/g, '<br>') + '</p></div>';
     area.innerHTML = h;
-    setTimeout(function () { window.print(); }, 60);
+    setTimeout(function () { withTitle(function () { window.print(); }); }, 60);
     return true;
   }
   function registerCSV(P, ft) {
     var d = registerData(P, ft);
-    var q = function (v) { v = String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var q = function (v) {
+      v = String(v);
+      if (/^\d{1,4}[-\/]\d{1,4}([-\/]\d{1,4})?$/.test(v)) return '"=""' + v + '"""';   // 25-4 之類的地號：Excel 會當成日期，改用文字公式
+      return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
     var lines = [d.cols.map(function (c) { return q((c.header || '').replace(/\n/g, '').replace(/[:：]$/, '')); }).join(',')].concat(d.rows.map(function (r) { return r.map(q).join(','); }));
     return '\ufeff' + lines.join('\r\n');
   }
 
-  global.Printer = { printRegister: printRegister, registerCSV: registerCSV, registerData: registerData, printA3: printA3, print8K: print8K, sheetSVG: sheetSVG, regionSVG: regionSVG, croppedDXF: croppedDXF };
+  global.Printer = { k8Page: k8Page, printRegister: printRegister, registerCSV: registerCSV, registerData: registerData, printA3: printA3, print8K: print8K, sheetSVG: sheetSVG, regionSVG: regionSVG, croppedDXF: croppedDXF };
 })(window);

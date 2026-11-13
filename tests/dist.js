@@ -2,7 +2,16 @@
 const { chromium } = require('playwright');
 const path = require('path'), fs = require('fs');
 const DIST = path.join(__dirname, '..', 'dist');
-const dir = fs.readdirSync(DIST).filter(d => /^CourtTask_v/.test(d) && fs.statSync(path.join(DIST, d)).isDirectory()).sort().pop();
+const vnum = n => (n.match(/_v([\d.]+?)(\.zip)?$/) || [0, '0'])[1].split('.').map(Number);
+const byVer = (a, b) => { const x = vnum(a), y = vnum(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
+let dir = fs.readdirSync(DIST).filter(d => /^CourtTask_v/.test(d) && fs.statSync(path.join(DIST, d)).isDirectory()).sort(byVer).pop();
+if (!dir) {
+  // 儲存庫只放 zip（解壓後的資料夾不進版控）：剛複製下來時先把最新的 zip 解開再測
+  const zip = fs.readdirSync(DIST).filter(d => /^CourtTask_v.*\.zip$/.test(d)).sort(byVer).pop();
+  if (!zip) { console.log('FAIL dist 裡沒有散發檔，請先執行 python3 tools/build.py <版本>'); process.exit(1); }
+  require('child_process').execFileSync('python3', ['-m', 'zipfile', '-e', path.join(DIST, zip), DIST]);
+  dir = zip.replace(/\.zip$/, '');
+}
 (async () => {
   const b = await require('./launch')();
   let fail = 0;

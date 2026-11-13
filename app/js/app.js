@@ -14,13 +14,15 @@
     undo: [], redo: [], lastSnap: null,
     draw: null,         // 繪製中的多邊形 / 線
     guides: [], snapPt: null, space: false,
-    planCads: [null]    // 各方案的圖資（可共用同一份）
+    planCads: [null],   // 各方案的圖資（可共用同一份）
+    folds: {}           // 面板裡各收合區塊的開合狀態
   };
   var svg, stage;
 
   /* ================= 工具 ================= */
   function toast(msg, ms) {
     var t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    var lm = $('#lastMsg'); if (lm) { lm.textContent = msg; lm.title = '最近一則訊息：' + msg; }   // 訊息消失後仍留在狀態列
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('show'); }, ms || 2600);
   }
   function round(v, d) { var k = Math.pow(10, d == null ? 2 : d); return Math.round(v * k) / k; }
@@ -37,23 +39,39 @@
     clearTimeout(changed._t);
     changed._t = setTimeout(checkpoint, 350);
   }
+  /* 復原紀錄每一筆＝{ s: 專案內容, c: 當時的圖資 }。圖資（匯入的 DXF）不在專案 JSON 裡，
+     所以要一起記，復原「匯入 DXF」時圖資才會跟著退回，線段樣式不會對到錯的線。 */
   function checkpoint() {
     var cur = snap();
-    if (cur === App.lastSnap) return;
-    if (App.lastSnap) { App.undo.push(App.lastSnap); if (App.undo.length > 200) App.undo.shift(); }
-    App.redo = []; App.lastSnap = cur;
-    autosave(); updateSteps();
+    if (cur === App.lastSnap && App.cad === App.lastCad) return;
+    if (App.lastSnap) { App.undo.push({ s: App.lastSnap, c: App.lastCad }); if (App.undo.length > 200) App.undo.shift(); }
+    App.redo = []; App.lastSnap = cur; App.lastCad = App.cad;
+    setDirty(true); autosave(); updateSteps();
+  }
+  function resetHistory() { App.undo = []; App.redo = []; App.lastSnap = snap(); App.lastCad = App.cad; }
+  function restoreSnap(e) {
+    App.lastSnap = e.s; App.lastCad = e.c;
+    App.P = JSON.parse(e.s); App.sel = null; App.selCell = null; App.draw = null; App.measure = null; App.tableEdit = null;
+    App.cad = e.c || null; App.planCads[App.P.planIdx] = App.cad;
+    setDirty(true); refreshAll(); autosave();
   }
   function undo() {
     checkpoint();
     if (!App.undo.length) return toast('沒有可復原的動作');
-    App.redo.push(App.lastSnap); App.lastSnap = App.undo.pop();
-    App.P = JSON.parse(App.lastSnap); App.sel = null; App.cad = App.planCads[App.P.planIdx] || App.cad; refreshAll();
+    App.redo.push({ s: App.lastSnap, c: App.lastCad }); restoreSnap(App.undo.pop());
   }
   function redo() {
     if (!App.redo.length) return;
-    App.undo.push(App.lastSnap); App.lastSnap = App.redo.pop();
-    App.P = JSON.parse(App.lastSnap); App.sel = null; App.cad = App.planCads[App.P.planIdx] || App.cad; refreshAll();
+    App.undo.push({ s: App.lastSnap, c: App.lastCad }); restoreSnap(App.redo.pop());
+  }
+  /* 尚未儲存的修改：標題列顯示 ●，關閉分頁或開啟其他檔案前提醒 */
+  function setDirty(on) {
+    App.dirty = !!on; updateTitle();
+  }
+  function updateTitle() {
+    var name = fileHandle && fileHandle.name ? fileHandle.name : defaultName();
+    document.title = (App.dirty ? '● ' : '') + name + ' － 法院略圖繪製系統';
+    var fn = $('#fileName'); if (fn) { fn.textContent = (App.dirty ? '● ' : '') + name; fn.title = App.dirty ? '有尚未儲存的修改（Ctrl+S 儲存）' : '目前的專案'; fn.classList.toggle('dirty', !!App.dirty); }
   }
   var IDB = {
     db: null,
@@ -126,13 +144,15 @@
       App.planCads = App.P.plans.map(function (pl, i) { var r = (d.planCad || [])[i]; return r >= 0 ? cads[r] : null; });
     } else App.planCads = [unpackCad(d.cad)];
     App.cad = App.planCads[App.P.planIdx] || null;
-    App.undo = []; App.redo = []; App.lastSnap = snap(); App.sel = null;
-    refreshAll(); fitView();
+    resetHistory(); App.sel = null; App.selCell = null; App.draw = null; App.measure = null; App.tableEdit = null;
+    setDirty(false); refreshAll(); fitView();
   }
   function upgrade(P) {
     var base = M.newProject();
     ['styles', 'sheet', 'output', 'settings', 'fields'].forEach(function (k) { P[k] = Object.assign(base[k], P[k] || {}); });
     P.output.k8 = Object.assign(M.newProject().output.k8, P.output.k8 || {});
+    // 8K 紙（紙夾標示 267×388）實際是橫放：寬 388、高 267。舊專案／舊範本存的是直式，開啟時改成橫式
+    if (+P.output.k8.w === 267 && +P.output.k8.h === 388) { P.output.k8.w = 388; P.output.k8.h = 267; }
     P.userLines = P.userLines || []; P.annos = P.annos || []; P.features = P.features || [];
     P.segStyle = P.segStyle || {}; P.textOver = P.textOver || {}; P.layerRoles = P.layerRoles || {}; P.splits = P.splits || {};
     if (!P.plans || !P.plans.length) { P.plans = [{ name: '方案1', data: null }]; P.planIdx = 0; }
@@ -151,7 +171,7 @@
   }
   function defaultName() {
     var f = App.P.fields;
-    return f.caseName || ((f.section || '') + (f.landNo || '') + '略圖') || '未命名';
+    return f.caseName || (f.section || f.landNo ? (f.section || '') + (f.landNo || '') + '略圖' : '未命名');
   }
   function download(name, text, type) {
     var blob = new Blob([text], { type: type || 'application/octet-stream' });
@@ -170,9 +190,9 @@
       p.then(function (h) {
         fileHandle = h;
         return h.createWritable().then(function (w) { return w.write(text).then(function () { return w.close(); }); });
-      }).then(function () { toast('已儲存：' + fileHandle.name); })
-        .catch(function (e) { if (e && e.name !== 'AbortError') { download(name, text); toast('已下載專案檔'); } });
-    } else { download(name, text); toast('已下載專案檔 ' + name); }
+      }).then(function () { setDirty(false); toast('已儲存：' + fileHandle.name); })
+        .catch(function (e) { if (e && e.name !== 'AbortError') { download(name, text); setDirty(false); toast('已下載專案檔'); } });
+    } else { download(name, text); setDirty(false); toast('已下載專案檔 ' + name); }
   }
   function readFile(file, asText) {
     return new Promise(function (res, rej) {
@@ -197,22 +217,28 @@
       App.planCads = [App.cad]; fileHandle = null;
       App.P.fields.caseName = file.name.replace(/\.m02$/i, '');
       App.P.plans[0].name = '舊檔';
-      App.undo = []; App.redo = []; App.lastSnap = snap(); App.sel = null;
-      refreshAll(); fitView(); autosave();
+      resetHistory(); App.sel = null; App.selCell = null;
+      setDirty(false); refreshAll(); fitView(); autosave();
       var unk = Object.keys(r.report.unknown).length ? '；略過不支援的物件（影像等）' + Object.keys(r.report.unknown).map(function (k) { return r.report.unknown[k]; }).reduce(function (a, b) { return a + b; }, 0) + ' 個' : '';
       toast('已開啟舊檔 ' + file.name + '：圖紙物件 ' + r.report.sheet + '、圖資線 ' + r.cad.lines.length + '、文字 ' + r.cad.texts.length + unk, 6000);
       if (r.report.warnings.length) setTimeout(function () { alert('舊檔轉換說明：\n・' + r.report.warnings.join('\n・') + '\n\n轉換後的文字、表格都可以直接修改；原本的說明表是一般表格，若要改成自動產生，請新增「說明項目表」並用點選成面重建說明項目。'); }, 300);
     }).catch(function (e) { alert('無法讀取 .m02：' + (e && e.message || e)); });
   }
   function openProject() {
-    pickFiles('.ctp,.json,.m02,.M02').then(function (fs) {
-      if (!fs.length) return;
-      fileHandle = null;
-      if (/\.m02$/i.test(fs[0].name)) { openM02(fs[0]); return; }
-      readFile(fs[0], true).then(function (t) {
-        try { loadData(JSON.parse(t)); toast('已開啟 ' + fs[0].name); } catch (e) { alert('無法開啟：' + e.message); }
+    // 用檔案存取 API 開啟時會拿到檔案控制代碼，之後按「儲存」就直接存回原檔，不必再選一次
+    var useFS = window.showOpenFilePicker && !navigator.webdriver;
+    var picked = useFS
+      ? window.showOpenFilePicker({ types: [{ description: '略圖專案／舊系統 .m02', accept: { 'application/json': ['.ctp', '.json'], 'application/octet-stream': ['.m02'] } }] })
+        .then(function (hs) { return hs[0].getFile().then(function (f) { return { file: f, handle: hs[0] }; }); })
+      : pickFiles('.ctp,.json,.m02,.M02').then(function (fs) { return fs.length ? { file: fs[0], handle: null } : null; });
+    picked.then(function (r) {
+      if (!r) return;
+      if (App.dirty && !confirm('目前的案件有尚未儲存的修改。\n\n按「確定」＝放棄這些修改，開啟「' + r.file.name + '」\n按「取消」＝回到目前的案件（可以先按儲存）')) return;
+      if (/\.m02$/i.test(r.file.name)) { fileHandle = null; openM02(r.file); return; }
+      return readFile(r.file, true).then(function (t) {
+        try { fileHandle = null; loadData(JSON.parse(t)); fileHandle = r.handle; updateTitle(); toast('已開啟 ' + r.file.name); } catch (e) { alert('無法開啟：' + e.message); }
       });
-    });
+    }).catch(function (e) { if (e && e.name !== 'AbortError') alert('無法開啟：' + (e && e.message || e)); });
   }
 
   /* ================= DXF 匯入 ================= */
@@ -242,6 +268,7 @@
             cad.name = (cad.name ? cad.name + ' + ' : '') + it.name;
           });
           App.cad = cad; App.planCads[App.P.planIdx] = cad;
+          if (replace) { App.sel = null; App.selCell = null; App.draw = null; App.measure = null; }   // 舊圖資的線段／地號索引已失效
           if (!R.parseParcels(App.P.merge.parcels).length) {
             var det = R.detectMerge(App.P, App.cad);
             if (det.length >= 2) { App.P.merge.parcels = det.join('、'); App.P.merge.mode = App.P.merge.mode || 'x'; toast('偵測到合併記號：' + det.join('、') + '（可在「圖層」頁修改）', 5000); }
@@ -389,8 +416,9 @@
       var mv = R.mapView(m);
       if (sel.kind === 'feature' || sel.kind === 'flabel') {
         var f = featById(sel.id);
-        if (f) {
-          s += '<path class="ov-feat" d="' + f.pts.map(function (p, i) { var q = mv.toP(p[0], p[1]); return (i ? 'L' : 'M') + q[0] + ' ' + q[1]; }).join('') + 'Z"/>';
+        if (f && f.pt) { var qm = mv.toP(f.pt[0], f.pt[1]); s += '<circle class="ov-pt" cx="' + qm[0] + '" cy="' + qm[1] + '" r="' + h * 0.9 + '"/>'; }
+        if (f && f.pts && f.pts.length >= 3) {
+          s += '<path class="ov-feat" fill-rule="evenodd" d="' + [f.pts].concat(f.holes || []).map(function (ring) { return ring.map(function (p, i) { var q = mv.toP(p[0], p[1]); return (i ? 'L' : 'M') + q[0] + ' ' + q[1]; }).join('') + 'Z'; }).join('') + '"/>';
           f.pts.forEach(function (p) { var q = mv.toP(p[0], p[1]); s += '<rect class="ov-v" x="' + (q[0] - h / 2.6) + '" y="' + (q[1] - h / 2.6) + '" width="' + h / 1.3 + '" height="' + h / 1.3 + '"/>'; });
         }
       }
@@ -415,8 +443,20 @@
       var dm = elById(App.draw.mapId), dv = R.mapView(dm);
       var pts = App.draw.pts.concat(App.draw.cursor ? [App.draw.cursor] : []);
       s += '<path class="ov-draw" d="' + pts.map(function (p, i) { var q = dv.toP(p[0], p[1]); return (i ? 'L' : 'M') + q[0] + ' ' + q[1]; }).join('') + (App.draw.type === 'poly' ? 'Z' : '') + '"/>';
+      if (App.draw.cursor && pts.length >= 2) {   // 目前這一段的長度
+        var pa = pts[pts.length - 2], pb = pts[pts.length - 1], qa = dv.toP(pa[0], pa[1]), qb = dv.toP(pb[0], pb[1]);
+        s += '<text class="ov-label" x="' + ((qa[0] + qb[0]) / 2 + 1.5) + '" y="' + ((qa[1] + qb[1]) / 2 - 1.5) + '" font-size="' + (11 / App.view.z) + '">' + Math.hypot(pb[0] - pa[0], pb[1] - pa[1]).toFixed(2) + ' m</text>';
+      }
       if (App.draw.type === 'poly' && pts.length >= 3) {
         s += '<text class="ov-label" x="' + (dv.toP(pts[pts.length - 1][0], pts[pts.length - 1][1])[0] + 2) + '" y="' + (dv.toP(pts[pts.length - 1][0], pts[pts.length - 1][1])[1] - 2) + '" font-size="' + (11 / App.view.z) + '">' + G.area(pts).toFixed(2) + ' m²</text>';
+      }
+    }
+    if (App.measure && App.tool === 'measure') {
+      var mm = elById(App.measure.mapId), me = App.measure.b || App.measure.cursor;
+      if (mm && me) {
+        var mv2 = R.mapView(mm), q1 = mv2.toP(App.measure.a[0], App.measure.a[1]), q2m = mv2.toP(me[0], me[1]);
+        s += '<line class="ov-measure" x1="' + q1[0] + '" y1="' + q1[1] + '" x2="' + q2m[0] + '" y2="' + q2m[1] + '"/>';
+        s += '<text class="ov-mlabel" x="' + ((q1[0] + q2m[0]) / 2 + 1.5) + '" y="' + ((q1[1] + q2m[1]) / 2 - 1.5) + '" font-size="' + (13 / App.view.z) + '">' + Math.hypot(me[0] - App.measure.a[0], me[1] - App.measure.a[1]).toFixed(2) + ' m</text>';
       }
     }
     if (App.snapPt) s += '<rect class="ov-snap" x="' + (App.snapPt[0] - h / 1.6) + '" y="' + (App.snapPt[1] - h / 1.6) + '" width="' + h * 1.25 + '" height="' + h * 1.25 + '"/>';
@@ -505,6 +545,7 @@
     for (var i = P.features.length - 1; i >= 0; i--) {
       var f = P.features[i]; if (f.label === false) continue;
       var lp = LY.feat[f.id] || f.labelAt || R.featAnchor(f);
+      if (!lp) continue;   // 只在表格的空白列沒有圖上位置
       if (Math.hypot(lp[0] - w[0], lp[1] - w[1]) < (f.labelSize || P.styles.featureLabel.size) * 0.6 / v.k) return { kind: 'flabel', id: f.id, mapId: m.id };
     }
     for (i = P.annos.length - 1; i >= 0; i--) {
@@ -533,7 +574,7 @@
     });
     if (best) return best;
     for (i = P.features.length - 1; i >= 0; i--) {
-      if (G.pointInPoly(w, P.features[i].pts)) return { kind: 'feature', id: P.features[i].id, mapId: m.id };
+      if (G.inPolyNet(w, P.features[i].pts, P.features[i].holes)) return { kind: 'feature', id: P.features[i].id, mapId: m.id };
     }
     return null;
   }
@@ -605,6 +646,13 @@
     if (tool === 'mark') {
       m = mapAt(p); if (!m) return toast('請在略圖框內點選位置');
       addMarkAt(m, R.mapView(m).toW(p[0], p[1])); return;
+    }
+    if (tool === 'measure') {
+      m = mapAt(p); if (!m) return toast('請在略圖框內點選');
+      var mw = snapWorld(m, p).w, ms = App.measure;
+      if (!ms || ms.b || ms.mapId !== m.id) App.measure = { mapId: m.id, a: mw, b: null, cursor: mw };
+      else { ms.b = mw; toast('距離 ' + Math.hypot(ms.b[0] - ms.a[0], ms.b[1] - ms.a[1]).toFixed(2) + ' 公尺（按 Enter 標註到圖上；再點一下重新量）', 5000); }
+      render(); return;
     }
     if (tool === 'assign') {
       m = mapAt(p); if (!m) return toast('請在略圖框內點選線段');
@@ -733,8 +781,8 @@
       if (App.draw) {
         var dm = elById(App.draw.mapId), sp = snapWorld(dm, p);
         App.draw.cursor = sp.w; App.snapPt = sp.p; render();
-      } else if (App.tool === 'poly' || App.tool === 'line' || App.tool === 'sline' || App.tool === 'break') {
-        if (m) { var s2 = snapWorld(m, p); App.snapPt = s2.p; } else App.snapPt = null;
+      } else if (App.tool === 'poly' || App.tool === 'line' || App.tool === 'sline' || App.tool === 'break' || App.tool === 'measure') {
+        if (m) { var s2 = snapWorld(m, p); App.snapPt = s2.p; if (App.tool === 'measure' && App.measure && !App.measure.b && App.measure.mapId === m.id) App.measure.cursor = s2.w; } else App.snapPt = null;
         render();
       }
       return;
@@ -765,7 +813,7 @@
       case 'divider': dragDivider(drag, dx, dy); break;
       case 'vertex': {
         var sv = snapWorld(drag.m, p); App.snapPt = sv.p;
-        drag.f.pts[drag.i] = [round(sv.w[0], 6), round(sv.w[1], 6)]; drag.f.arcAdj = arcAdj(drag.f.pts); delete drag.f.seeds; refreshFeatures(); break;
+        drag.f.pts[drag.i] = [round(sv.w[0], 6), round(sv.w[1], 6)]; drag.f.arcAdj = arcAdj(drag.f.pts, drag.f.holes); delete drag.f.seeds; refreshFeatures(); break;
       }
       case 'sub': {
         if (!drag.moved && Math.hypot(dx, dy) < 2 / App.view.z) return;
@@ -906,7 +954,14 @@
   function ovFeatures(ov) { return ov ? App.P.features.filter(function (f) { return (f.ov || 'case') === ov; }) : App.P.features; }
   function ovScheme(ov) { ov = ov || App.P.activeOv || 'case'; var o = App.P.ovs[ov] || {}; return o.codeScheme || (ov === 'split' ? 'stem' : 'alpha'); }
   function nextCodeOv() { var ov = App.P.activeOv || 'case'; return M.nextCode(ovFeatures(ov), ovScheme(ov)); }
-  function arcAdj(pts) { return App.cad ? round(G.arcCorrection(pts, App.cad.arcs), 6) : 0; }
+  function arcAdj(pts, holes) {
+    if (!App.cad) return 0;
+    var a = G.arcCorrection(pts, App.cad.arcs);
+    (holes || []).forEach(function (h) { a -= G.arcCorrection(h, App.cad.arcs); });
+    return round(a, 6);
+  }
+  function r6(ring) { return ring.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }); }
+  function holeNote(f) { var n = (f.holes || []).length; return n ? '，已扣除內部 ' + n + ' 個封閉區 ' + (G.area(f.pts) - G.areaNet(f.pts, f.holes)).toFixed(2) + ' m²' : ''; }
   function faceSegs(m, pts) {
     var P = App.P, segs = [], R2 = Math.max(m.w, m.h) * m.scale / 1000, bx = G.bbox(pts);
     bx = [bx[0] - R2, bx[1] - R2, bx[2] + R2, bx[3] + R2];
@@ -945,23 +1000,25 @@
       var seeds = (target.seeds || [G.labelPoint(target.pts)]).concat([w]);
       var u = G.faceUnionAt(faceSegs(m, seeds), seeds, 0.002);
       if (!u) return toast('找不到可合併的封閉區域');
-      target.seeds = seeds; target.pts = u.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }); target.arcAdj = arcAdj(target.pts);
+      target.seeds = seeds; target.pts = r6(u); target.holes = (u.holes || []).map(r6); if (!target.holes.length) delete target.holes; target.arcAdj = arcAdj(target.pts, target.holes);
       delete target.labelAt;
       changed(); render(); refreshFeatures(); renderProps();
-      return toast('已併入 ' + target.code + '：' + R.featureArea(target, 2) + ' m²');
+      return toast('已併入 ' + target.code + '：' + R.featureArea(target, 2) + ' m²' + holeNote(target));
     }
     var face = G.faceAt(faceSegs(m, [w]), w, 0.002);
     if (!face) return toast('此處找不到封閉區域（請確認線段有閉合）');
-    var a = G.area(face);
-    var dup = P.features.filter(function (f) { return !f.pt && Math.abs(G.area(f.pts) - a) < 0.005 && G.pointInPoly(w, f.pts); })[0];
+    var a = G.area(face), curOv = P.activeOv || 'case';
+    // 同一層已有同一塊才算重複；現況和分割可以各自用同一塊範圍
+    var dup = P.features.filter(function (f) { return !f.pt && (f.ov || 'case') === curOv && Math.abs(G.area(f.pts) - a) < 0.005 && G.pointInPoly(w, f.pts); })[0];
     if (dup) { select({ kind: 'feature', id: dup.id, mapId: m.id }); return toast('此區域已是說明項目 ' + dup.code); }
     var f = {
       id: M.uid(), ov: P.activeOv || 'case', code: nextCodeOv(), pts: face.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }),
       landNo: P.fields.landNo || '', note: '', outline: false, dash: false, label: true, seeds: [w]
     };
-    f.arcAdj = arcAdj(f.pts);
+    if (face.holes && face.holes.length) f.holes = face.holes.map(r6);   // 面內不相連的封閉區（島）要從面積扣掉
+    f.arcAdj = arcAdj(f.pts, f.holes);
     P.features.push(f); ensureSplitTables(); select({ kind: 'feature', id: f.id, mapId: m.id });
-    changed(); toast('新增說明項目 ' + f.code + '：' + R.featureArea(f, 2) + ' m²（Shift+點選相鄰區塊可併入）');
+    changed(); toast('新增說明項目 ' + f.code + '：' + R.featureArea(f, 2) + ' m²' + (holeNote(f) || '（Shift+點選相鄰區塊可併入）'), f.holes ? 5000 : 0);
   }
   function finishDraw() {
     var d = App.draw; if (!d) return;
@@ -971,13 +1028,24 @@
         var f = { id: M.uid(), ov: P.activeOv || 'case', code: nextCodeOv(), pts: d.pts.map(function (p) { return [round(p[0], 6), round(p[1], 6)]; }), landNo: P.fields.landNo || '', note: '', outline: true, dash: false, label: true };
         f.arcAdj = arcAdj(f.pts);
         P.features.push(f); ensureSplitTables(); App.draw = null; select({ kind: 'feature', id: f.id, mapId: d.mapId }); changed();
-        toast('新增說明項目 ' + f.code + '：' + G.area(f.pts).toFixed(2) + ' m²');
+        toast('新增說明項目 ' + f.code + '：' + R.featureArea(f, 2) + ' m²');
       } else { App.draw = null; toast('至少需要 3 點'); }
     } else {
       for (var i = 0; i + 1 < d.pts.length; i++) P.userLines.push({ role: d.role || 'case', x1: round(d.pts[i][0], 4), y1: round(d.pts[i][1], 4), x2: round(d.pts[i + 1][0], 4), y2: round(d.pts[i + 1][1], 4) });
       App.draw = null; changed();
     }
     App.snapPt = null; render(); refreshPanels();
+  }
+  /* 把剛量的距離標註到圖上（邊長標註）：文字放在線段中點旁、順著線的方向 */
+  function measureToAnno() {
+    var ms = App.measure, m = ms && elById(ms.mapId); if (!ms || !ms.b || !m) return;
+    var dx = ms.b[0] - ms.a[0], dy = ms.b[1] - ms.a[1], L = Math.hypot(dx, dy); if (L < 0.005) return;
+    var rot = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (rot > 90) rot -= 180; else if (rot <= -90) rot += 180;   // 文字不要倒過來
+    var size = App.P.styles.anno.size * 0.8, off = size * 0.75 / (1000 / m.scale);   // 往線的一側偏移約一個字高
+    var a = { id: M.uid(), x: round((ms.a[0] + ms.b[0]) / 2 - dy / L * off, 3), y: round((ms.a[1] + ms.b[1]) / 2 + dx / L * off, 3), text: L.toFixed(2), size: round(size, 2), rot: round(rot, 1), font: 'sans' };
+    App.P.annos.push(a); App.measure = null;
+    changed(); render(); toast('已標註 ' + a.text + '（可用選取工具拖曳位置、改字高或刪除）', 3500);
   }
   /* 斷線：在點選位置把線段切成兩段，之後可分別設定線型或隱藏 */
   function breakAt(m, p) {
@@ -1247,16 +1315,21 @@
   }
   /* 面積配賦：最大餘數法 */
   function distributeArea(total) {
-    var P = App.P, fs = P.features.filter(function (f) { return !f.hideInTable; });
-    if (!(total > 0) || !fs.length) return toast('請輸入登記總面積');
-    fs = fs.filter(function (f) { return !f.pt; });
-    var comp = fs.map(function (f) { return G.area(f.pts) + (f.arcAdj || 0); }), sum = comp.reduce(function (a, b) { return a + b; }, 0);
+    var P = App.P;
+    if (!(total > 0)) return toast('請輸入登記總面積');
+    // 只配賦一層（現況或分割不能混在一起分），而且只算圖上有面的項目（標號、空白列不算）
+    var usable = function (ov) { return P.features.filter(function (f) { return (f.ov || 'case') === ov && !f.hideInTable && !f.pt && f.pts && f.pts.length >= 3; }); };
+    var ov = P.activeOv || 'case', fs = usable(ov);
+    if (!fs.length) { ov = ov === 'case' ? 'split' : 'case'; fs = usable(ov); }
+    if (!fs.length) return toast('沒有可以配賦的說明項目（要先用「點選成面」建立）');
+    var comp = fs.map(function (f) { return R.featCalc(f); }), sum = comp.reduce(function (a, b) { return a + b; }, 0);
+    if (!(sum > 0)) return toast('計算面積合計為 0，無法配賦');
     var cents = Math.round(total * 100), raw = comp.map(function (a) { return a / sum * cents; });
     var fl = raw.map(Math.floor), rest = cents - fl.reduce(function (a, b) { return a + b; }, 0);
     raw.map(function (r, i) { return [r - fl[i], i]; }).sort(function (a, b) { return b[0] - a[0]; }).slice(0, rest).forEach(function (x) { fl[x[1]]++; });
     fs.forEach(function (f, i) { f.areaOverride = (fl[i] / 100).toFixed(2); });
     changed(); render(); renderFeatTab();
-    toast('已配賦：計算合計 ' + sum.toFixed(4) + ' → 登記 ' + total.toFixed(2) + '（差 ' + (total - sum).toFixed(4) + '）', 4500);
+    toast('已配賦「' + P.ovs[ov].name + '」' + fs.length + ' 筆：計算合計 ' + sum.toFixed(4) + ' → 登記 ' + total.toFixed(2) + '（差 ' + (total - sum).toFixed(4) + '）', 4500);
   }
   function refreshFeatures() { if (App.tab === 'feat') renderFeatTab(); }
 
@@ -1374,6 +1447,11 @@
   function arrowSel(k, v) { return sel(k, v || '', [['', '無'], ['end', '終點箭頭 →'], ['start', '起點箭頭 ←'], ['both', '兩端箭頭 ↔']]); }
   function color(k, v) { return '<input data-k="' + k + '" type="color" value="' + (v || '#000000') + '">'; }
   function ta(k, v, rows) { return '<textarea data-k="' + k + '" rows="' + (rows || 3) + '">' + R.esc(v == null ? '' : v) + '</textarea>'; }
+  /* 可收合的區塊：開合狀態記在 App.folds，面板重畫後不會彈回去 */
+  function fold(key, title, inner, defOpen) {
+    var open = App.folds[key] != null ? App.folds[key] : !!defOpen;
+    return '<details class="fold" data-fold="' + key + '"' + (open ? ' open' : '') + '><summary>' + title + '</summary><div class="foldbody">' + inner + '</div></details>';
+  }
   function btn(act, label, cls) { return '<button data-act="' + act + '" class="' + (cls || '') + '">' + label + '</button>'; }
 
   /* 通用綁定：data-k 對應 target[k]（支援 a.b） */
@@ -1385,7 +1463,12 @@
         for (var i = 0; i < path.length - 1; i++) o = o[path[i]] = o[path[i]] || {};
         var key = path[path.length - 1], v;
         if (inpEl.type === 'checkbox') v = inpEl.checked;
-        else if (inpEl.type === 'number') { v = inpEl.value === '' ? null : parseFloat(inpEl.value); if (v !== null && isNaN(v)) return; }
+        else if (inpEl.type === 'number') {
+          v = inpEl.value === '' ? null : parseFloat(inpEl.value); if (v !== null && isNaN(v)) return;
+          // 必填的數字欄（沒有「預設」提示的）清空時先不套用，等輸入完再生效；小於下限的值也不套用
+          if (v === null && !inpEl.placeholder) return;
+          if (v !== null && inpEl.min !== '' && v < parseFloat(inpEl.min)) return;
+        }
         else v = inpEl.value;
         if (inpEl.dataset.num === '1' && v !== '' && v != null) { var nv = parseFloat(v); if (!isNaN(nv)) v = nv; }
         o[key] = v;
@@ -1398,42 +1481,39 @@
   function renderProps() {
     var box = $('#props'), s = App.sel, P = App.P, h = '';
     if (!s) {
-      box.innerHTML = '<div class="hint"><b>操作提示</b><ul>' +
-        '<li>點選元件可移動，拖拉控制點可縮放；移動時會自動對齊其他元件（按住 Alt 取消對齊）。</li>' +
-        '<li>略圖框：框內拖曳＝移圖（換裁切位置），拖框線＝移動框；裁好可在右鍵「鎖定裁切」。</li>' +
-        '<li>表格：<b>雙擊</b>進入編輯，才可拉格線、點格子、Shift 多選合併；Esc 結束。</li>' +
-        '<li><b>右鍵</b>：線段可改圖層、線型、粗細、顏色、斷線；其他物件也有常用功能。</li>' +
-        '<li>畫布右上角「鎖定」：鎖住不想動到的圖層（地籍線預設鎖定）。</li>' +
-        '<li>滾輪縮放；空白鍵或中鍵拖曳平移。Ctrl+Z 復原、Ctrl+S 儲存、Delete 刪除。</li></ul></div>';
+      box.innerHTML = '<div class="empty"><div class="emptyico">↖</div><b>尚未選取</b>' +
+        '<p>點一下圖上的元件、線段、地號或編號，這裡會顯示可以調整的項目。</p>' +
+        '<p class="small">在圖上按<b>右鍵</b>有常用功能；完整的操作說明在右上角「？」。</p></div>';
       return;
     }
     if (s.kind === 'el') {
       var el = elById(s.id); if (!el) { box.innerHTML = ''; return; }
       var TYPE = { text: '文字', rect: '矩形框', line: '線', table: '表格', ftable: '說明表', north: '指北針', map: '略圖框' };
-      h += '<div class="ptitle">' + TYPE[el.type] + '<small>' + R.esc(el.name || '') + '</small></div>';
-      h += field('名稱', inp('name', el.name));
+      h += '<div class="ptitle">' + TYPE[el.type] + (el.name && el.name !== TYPE[el.type] ? '<small>' + R.esc(el.name) + '</small>' : '') + '</div>';
       var isTbl = el.type === 'table' || el.type === 'ftable';
-      h += '<div class="grid2">' + field('X (mm)', inp('x', el.x, 'number', 'step="0.1"')) + field('Y (mm)', inp('y', el.y, 'number', 'step="0.1"'));
-      if (!isTbl) h += field(el.type === 'line' ? 'ΔX' : '寬 (mm)', inp('w', el.w, 'number', 'step="0.1"')) + field(el.type === 'line' ? 'ΔY' : '高 (mm)', inp('h', el.h, 'number', 'step="0.1"'));
-      h += '</div>';
       if (el.type === 'text') {
         h += field('內容（可用 {欄位}，如 {landNo}、{scale}）', ta('text', el.text, 3));
-        h += '<div class="grid2">' + field('字高 (mm)', inp('fs', el.fs, 'number', 'step="0.1"')) + field('字距 (mm)', inp('ls', el.ls || 0, 'number', 'step="0.1"')) +
+        h += '<div class="grid2">' + field('字高 (mm)', inp('fs', el.fs, 'number', 'step="0.1" min="0.5"')) +
+          field('水平', sel('align', el.align, [['left', '靠左'], ['center', '置中'], ['right', '靠右']])) + '</div>';
+        h += fold('textMore', '更多文字設定', '<div class="grid2">' + field('字距 (mm)', inp('ls', el.ls || 0, 'number', 'step="0.1"')) +
           field('字型', sel('font', el.font || 'kai', [['kai', '標楷體'], ['sans', '黑體/Arial']])) + field('顏色', color('color', el.color || '#000000')) +
-          field('水平', sel('align', el.align, [['left', '靠左'], ['center', '置中'], ['right', '靠右']])) + field('垂直', sel('valign', el.valign, [['top', '靠上'], ['middle', '置中'], ['bottom', '靠下']])) +
-          field('排版', sel('fit', el.fit || '', [['', '自動換行'], ['shrink', '縮小以符合']])) + field('框線', chk('border', el.border)) + '</div>';
+          field('垂直', sel('valign', el.valign, [['top', '靠上'], ['middle', '置中'], ['bottom', '靠下']])) +
+          field('排版', sel('fit', el.fit || '', [['', '自動換行'], ['shrink', '縮小以符合']])) + field('框線', chk('border', el.border)) + '</div>');
       }
       if (el.type === 'rect' || el.type === 'line') {
-        h += '<div class="grid2">' + field('線寬 (mm)', inp('lw', el.lw || 0.24, 'number', 'step="0.01"')) + field('顏色', color('color', el.color || '#000000')) +
+        h += '<div class="grid2">' + field('線寬 (mm)', inp('lw', el.lw || 0.24, 'number', 'step="0.01" min="0.01"')) + field('顏色', color('color', el.color || '#000000')) +
           field('線型', dashSel('dash', el.dash)) + (el.type === 'line' ? field('箭頭', arrowSel('arrow', el.arrow)) : '') + '</div>';
       }
       if (el.type === 'north') h += field('文字', inp('label', el.label || '北'));
       if (el.type === 'map') h += mapProps(el);
-      if (el.type === 'table' || el.type === 'ftable') h += '<div class="btnrow">' + (App.tableEdit === el.id ? btn('tedit', '結束表格編輯 (Esc)', 'primary') : btn('tedit', '編輯表格（或雙擊表格）')) + '</div>';
+      if (isTbl) h += '<div class="btnrow">' + (App.tableEdit === el.id ? btn('tedit', '結束表格編輯 (Esc)', 'primary') : btn('tedit', '編輯表格（或雙擊表格）')) + '</div>';
       if (el.type === 'table') h += tableProps(el);
       if (el.type === 'ftable') h += ftableProps(el);
-      h += '<div class="btnrow">' + btn('front', '移到最上層') + btn('back', '移到最下層') + btn('dup', '複製') + '</div>';
-      h += '<div class="btnrow">' + '<label class="inline">' + chk('locked', el.locked) + ' 鎖定</label>' + btn('del', '刪除', 'danger') + '</div>';
+      var geo = field('名稱', inp('name', el.name)) + '<div class="grid2">' + field('X (mm)', inp('x', el.x, 'number', 'step="0.1"')) + field('Y (mm)', inp('y', el.y, 'number', 'step="0.1"'));
+      if (!isTbl) geo += field(el.type === 'line' ? 'ΔX' : '寬 (mm)', inp('w', el.w, 'number', 'step="0.1"')) + field(el.type === 'line' ? 'ΔY' : '高 (mm)', inp('h', el.h, 'number', 'step="0.1"'));
+      geo += '</div><div class="btnrow">' + btn('front', '移到最上層') + btn('back', '移到最下層') + '</div>';
+      h += fold('geo', '位置、大小與圖層順序', geo);
+      h += '<div class="btnrow foot">' + '<label class="inline">' + chk('locked', el.locked) + ' 鎖定位置</label>' + btn('dup', '複製') + btn('del', '刪除', 'danger') + '</div>';
       box.innerHTML = h;
       bind(box, el, function (k) { if (k === 'name') renderLayerList(); if (k === 'locked') render(); });
       bindTableCellEditor(box, el);
@@ -1449,17 +1529,17 @@
     }
     if (s.kind === 'feature' || s.kind === 'flabel') {
       var f = featById(s.id); if (!f) { box.innerHTML = ''; return; }
-      h += '<div class="ptitle">' + (f.pt ? '標號 ' : '說明項目 ') + R.esc(f.code) + '<small>' + (f.pt ? '只有編號，不計算面積（面積欄可自行填寫）' : '計算面積 ' + (G.area(f.pts) + (f.arcAdj || 0)).toFixed(4) + ' m²') + '</small></div>';
+      h += '<div class="ptitle">' + (f.pt ? '標號 ' : '說明項目 ') + R.esc(f.code) + '<small>' + (f.pt ? '只有編號，不計算面積（面積欄可自行填寫）' : '計算面積 ' + R.featCalc(f).toFixed(4) + ' m²') + '</small></div>';
       h += '<div class="grid2">' + field('編號', inp('code', f.code)) + field('使用地號', inp('landNo', f.landNo)) + '</div>';
       h += field('備註（如門牌、倉庫）', inp('note', f.note));
       h += '<div class="grid2">' + field('所有權人', inp('owner', f.owner)) + field('其他（自訂欄）', inp('extra', f.extra)) + '</div>';
-      h += field('面積（空白＝自動計算）', inp('areaOverride', f.areaOverride == null ? '' : f.areaOverride, 'text', 'placeholder="' + G.area(f.pts).toFixed(2) + '"'));
-      h += '<div class="grid2">' + field('顯示外框', chk('outline', f.outline)) + field('外框線型', dashSel('dash', f.dash)) +
-        field('外框線寬', inp('lw', f.lw || P.styles.caseLine.width, 'number', 'step="0.01"')) + field('外框顏色', color('color', f.color || P.styles.caseLine.color)) +
+      h += field('面積（空白＝自動計算）', inp('areaOverride', f.areaOverride == null ? '' : f.areaOverride, 'text', 'placeholder="' + R.featCalc(f).toFixed(2) + '"'));
+      h += fold('featShow', '圖上的顯示方式（外框、填色、編號）', '<div class="grid2">' + field('顯示外框', chk('outline', f.outline)) + field('外框線型', dashSel('dash', f.dash)) +
+        field('外框線寬', inp('lw', f.lw || P.styles.caseLine.width, 'number', 'step="0.01" min="0.01"')) + field('外框顏色', color('color', f.color || P.styles.caseLine.color)) +
         field('填色', '<span class="row">' + chk('fillOn', !!f.fill) + color('fillColor', f.fill || '#ffcccc') + '</span>') +
-        field('顯示編號', chk('label', f.label !== false)) + field('編號字高', inp('labelSize', f.labelSize || P.styles.featureLabel.size, 'number', 'step="0.1"')) +
+        field('顯示編號', chk('label', f.label !== false)) + field('編號字高', inp('labelSize', f.labelSize || P.styles.featureLabel.size, 'number', 'step="0.1" min="0.5"')) +
         field('編號引線（小區塊用）', chk('leader', f.leader)) +
-        field('不列入說明表', chk('hideInTable', f.hideInTable)) + '</div>';
+        field('不列入說明表', chk('hideInTable', f.hideInTable)) + '</div>');
       h += '<div class="btnrow">' + btn('resetLabel', '編號位置重設') + btn('del', '刪除', 'danger') + '</div>';
       h += '<p class="small">拖曳藍色頂點可修改形狀（會自動鎖點）。用「點選成面」時按住 Shift 點相鄰區塊，可併入此說明項目。' + (f.arcAdj ? '（含圓弧修正 ' + f.arcAdj.toFixed(4) + ' m²）' : '') + '</p>';
       box.innerHTML = h;
@@ -1478,6 +1558,7 @@
     }
     if (s.kind === 'seg' || s.kind === 'uline') {
       var isU = s.kind === 'uline', ul = isU ? P.userLines[s.idx] : null;
+      if (isU ? !ul : !(App.cad && s.idx.length && App.cad.lines[parseInt(s.idx[0], 10)])) { App.sel = null; return renderProps(); }   // 選取的線已不存在
       var first = isU ? ul : (P.segStyle[s.idx[0]] || {});
       var lay = isU ? '自繪線' : App.cad.lines[parseInt(s.idx[0], 10)].layer;
       var anySplit = !isU && s.idx.some(function (k) { return P.splits[parseInt(k, 10)]; });
@@ -1521,7 +1602,8 @@
       return;
     }
     if (s.kind === 'ptext') {
-      var t = App.cad.texts[s.idx], ov = P.textOver[s.idx] || {};
+      var t = App.cad && App.cad.texts[s.idx], ov = P.textOver[s.idx] || {};
+      if (!t) { App.sel = null; return renderProps(); }
       h += '<div class="ptitle">地號文字 ' + R.esc(t.text) + '<small>圖層 ' + R.esc(t.layer) + '</small></div>';
       h += '<div class="grid2">' + field('字高 (mm)', inp('size', ov.size || '', 'number', 'step="0.1" placeholder="預設"')) + field('顏色', color('color', ov.color || '#000000')) + '</div>';
       h += '<div class="btnrow">' + btn('reset', '恢復原位置/樣式') + btn('del', '隱藏', 'danger') + '</div>';
@@ -1548,24 +1630,24 @@
 
   function mapProps(el) {
     var presets = [100, 200, 250, 300, 500, 600, 1000, 1200, 2000, 2500, 3000, 5000];
-    var h = '<div class="sec">比例尺與裁切</div>';
-    h += '<div class="grid2">' + field('比例尺 1/', inp('scale', el.scale, 'number', 'step="1" min="1" list="scaleList"')) +
-      field('常用', sel('_preset', '', [['', '選擇…']].concat(presets.map(function (p) { return [p, '1/' + p]; })))) + '</div>';
+    var h = '<div class="grid2">' + field('比例尺 1/', inp('scale', el.scale, 'number', 'step="1" min="1" list="scaleList"')) +
+      field('常用比例尺', sel('_preset', '', [['', '選擇…']].concat(presets.map(function (p) { return [p, '1/' + p]; })))) + '</div>';
     h += '<datalist id="scaleList">' + presets.map(function (p) { return '<option value="' + p + '">'; }).join('') + '</datalist>';
     var k = 1000 / el.scale;
     h += '<div class="grid2">' + field('裁切寬 (cm)', '<input data-geo="w" type="number" step="0.1" value="' + round(el.w / 10, 2) + '">') +
       field('裁切高 (cm)', '<input data-geo="h" type="number" step="0.1" value="' + round(el.h / 10, 2) + '">') + '</div>';
     h += '<p class="small">實地範圍：' + round(el.w / k, 2) + ' × ' + round(el.h / k, 2) + ' 公尺</p>';
-    h += '<div class="grid2">' + field('中心 E (TWD97)', inp('cx', el.cx, 'number', 'step="0.001"')) + field('中心 N (TWD97)', inp('cy', el.cy, 'number', 'step="0.001"')) + '</div>';
-    h += '<div class="btnrow">' + btn('centerCase', '置中：案件線') + btn('centerTarget', '置中：本案地號') + btn('centerFeat', '置中：說明項目') + '</div>';
+    h += '<div class="btnrow"><span class="small">置中到</span>' + btn('centerCase', '案件線') + btn('centerTarget', '本案地號') + btn('centerFeat', '說明項目') + '</div>';
+    h += '<label class="inline">' + chk('lockCrop', el.lockCrop) + ' 鎖定裁切（裁好後勾選，框內拖曳就不會移圖）</label>';
     var TSc = R.textScales(el);
-    h += '<div class="sec">文字大小倍率（此略圖框）</div><div class="grid3">' +
+    h += fold('mapText', '文字大小倍率（此略圖框）', '<div class="grid3">' +
       field('編號', '<input data-k="tsFeat" type="number" step="0.05" min="0.1" value="' + TSc.feat + '">') +
       field('本案地號', '<input data-k="tsTarget" type="number" step="0.05" min="0.1" value="' + TSc.target + '">') +
-      field('非本案地號', '<input data-k="tsParcel" type="number" step="0.05" min="0.1" value="' + TSc.parcel + '">') + '</div>';
-    h += '<div class="grid2">' + field('外框', chk('border', el.border !== false)) + field('框下顯示比例尺', chk('scaleLabel', el.scaleLabel)) + field('外框線寬', inp('lw', el.lw || 0.18, 'number', 'step="0.01"')) + field('白底（遮住下層）', chk('bg', el.bg !== false)) + '</div>';
-    h += '<label class="inline">' + chk('lockCrop', el.lockCrop) + ' 鎖定裁切（裁好後勾選，框內拖曳就不會移圖）</label>';
-    h += '<div class="btnrow">' + btn('exportDxf', '匯出裁切 DXF', 'primary') + '</div>';
+      field('非本案地號', '<input data-k="tsParcel" type="number" step="0.05" min="0.1" value="' + TSc.parcel + '">') + '</div>' +
+      '<p class="small">比例尺小（例如 1/2000）字擠在一起時，把倍率調小，例如 0.4。</p>');
+    h += fold('mapMore', '外框、中心座標、匯出 DXF', '<div class="grid2">' + field('中心 E (TWD97)', inp('cx', el.cx, 'number', 'step="0.001"')) + field('中心 N (TWD97)', inp('cy', el.cy, 'number', 'step="0.001"')) +
+      field('外框', chk('border', el.border !== false)) + field('框下顯示比例尺', chk('scaleLabel', el.scaleLabel)) + field('外框線寬', inp('lw', el.lw || 0.18, 'number', 'step="0.01" min="0.01"')) + field('白底（遮住下層）', chk('bg', el.bg !== false)) + '</div>' +
+      '<div class="btnrow">' + btn('exportDxf', '匯出裁切 DXF') + '</div>');
     return h;
   }
   function tableProps(el) {
@@ -1651,33 +1733,33 @@
   }
   var FT_KEYS = [['code', '編號／名稱'], ['area', '面積'], ['landNo', '地號'], ['note', '備註'], ['owner', '所有權人'], ['extra', '其他(自訂)']];
   function ftableProps(el) {
-    var h = '<div class="sec">說明表</div>';
-    var cur = tableStyleOf(el);
+    var h = '', cur = tableStyleOf(el);
     h += field('表格樣式', '<select data-act-sel="tstyle">' + (cur ? '' : '<option value="">（自訂欄位）</option>') + Object.keys(TABLE_STYLES).map(function (k) {
       return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + TABLE_STYLES[k].name + '</option>'; }).join('') + '</select>');
-    h += field('標題（列高 0 = 不顯示標題列）', inp('title', el.title));
-    h += '<div class="grid2">' + field('列出哪一層', sel('ov', el.ov || '', [['', '全部']].concat(Object.keys(App.P.ovs).map(function (k) { return [k, App.P.ovs[k].name]; })))) +
-      field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || '')) + '</div>';
-    h += '<div class="grid2">' + field('標題列高', inp('titleH', el.titleH, 'number', 'step="0.1" min="0"')) + field('標題字高', inp('titleFs', el.titleFs, 'number', 'step="0.05"')) +
-      field('表頭列高（0=不顯示）', inp('headerH', el.headerH, 'number', 'step="0.1" min="0"')) + field('表頭字高', inp('headerFs', el.headerFs, 'number', 'step="0.05"')) +
-      field('資料列高(預設)', inp('rowH', el.rowH, 'number', 'step="0.1"')) + field('內容字高', inp('dataFs', el.dataFs, 'number', 'step="0.05"')) +
-      field('附註列高（0=不顯示）', inp('notesH', el.notesH, 'number', 'step="0.1" min="0"')) + field('附註字高', inp('notesFs', el.notesFs, 'number', 'step="0.05"')) +
-      field('面積小數位', inp('decimals', el.decimals, 'number', 'step="1" min="0" max="4"')) + field('框線寬', inp('lw', el.lw == null ? 0.24 : el.lw, 'number', 'step="0.01"')) + '</div>';
-    h += '<label class="inline">' + chk('autoRowH', el.autoRowH !== false) + ' 資料列高自動配合文字（文字多時自動換行、列變高；不勾＝字縮小塞進固定列高）</label>';
-    var otherT = App.P.elements.filter(function (e) { return e.type === 'ftable' && e.id !== el.id; })[0];
+    h += field('標題', inp('title', el.title));
+    h += field('附註文字', ta('notes', el.notes, 3));
     var pr3 = ftPair();
     if (pr3) h += '<div class="seg2"><span>兩張說明表</span><button data-act="stackJoin" class="' + (pr3.joined ? 'on' : '') + '">接在一起</button><button data-act="stackSplit" class="' + (pr3.joined ? '' : 'on') + '">分開擺放</button></div>';
-    h += '<div class="sec">欄位（可增減、調整順序）</div><table class="flist cols"><thead><tr><th>內容</th><th>表頭文字（\\n 換行）</th><th>寬</th><th>字高</th><th></th></tr></thead><tbody>';
+    h += '<p class="small">表格內容由左側「說明」頁的清單自動產生。</p>';
+    var colsH = '<table class="flist cols"><thead><tr><th>內容</th><th>表頭文字（\\n 換行）</th><th>寬</th><th>字高</th><th></th></tr></thead><tbody>';
     el.columns.forEach(function (c, i) {
-      h += '<tr data-ci="' + i + '"><td><select data-col="key">' + FT_KEYS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === c.key ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td>' +
+      colsH += '<tr data-ci="' + i + '"><td><select data-col="key">' + FT_KEYS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === c.key ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td>' +
         '<td><input data-col="header" value="' + R.esc((c.header || '').replace(/\n/g, '\\n')) + '"></td>' +
         '<td><input data-col="w" type="number" step="0.1" value="' + el.cols[i] + '"></td>' +
         '<td><input data-col="fs" type="number" step="0.05" placeholder="' + el.dataFs + '" value="' + (c.fs || '') + '"></td>' +
         '<td class="ops"><button data-cop="up">↑</button><button data-cop="down">↓</button><button data-cop="del">✕</button></td></tr>';
     });
-    h += '</tbody></table><div class="btnrow">' + btn('colAdd', '新增欄位') + btn('rowsUniform', '資料列高全部一致') + '</div>';
-    h += field('附註文字', ta('notes', el.notes, 3));
-    h += '<p class="small">內容由左側「說明」頁的清單自動產生，修改說明項目資料即同步更新。</p>';
+    colsH += '</tbody></table><div class="btnrow">' + btn('colAdd', '新增欄位') + '</div>';
+    h += fold('ftCols', '欄位（增減、順序、表頭文字）', colsH);
+    h += fold('ftSize', '列高與字高', '<div class="grid2">' + field('標題列高（0=不顯示）', inp('titleH', el.titleH, 'number', 'step="0.1" min="0"')) + field('標題字高', inp('titleFs', el.titleFs, 'number', 'step="0.05" min="0.5"')) +
+      field('表頭列高（0=不顯示）', inp('headerH', el.headerH, 'number', 'step="0.1" min="0"')) + field('表頭字高', inp('headerFs', el.headerFs, 'number', 'step="0.05" min="0.5"')) +
+      field('資料列高(預設)', inp('rowH', el.rowH, 'number', 'step="0.1" min="1"')) + field('內容字高', inp('dataFs', el.dataFs, 'number', 'step="0.05" min="0.5"')) +
+      field('附註列高（0=不顯示）', inp('notesH', el.notesH, 'number', 'step="0.1" min="0"')) + field('附註字高', inp('notesFs', el.notesFs, 'number', 'step="0.05" min="0.5"')) + '</div>' +
+      '<label class="inline">' + chk('autoRowH', el.autoRowH !== false) + ' 資料列高自動配合文字（文字多時自動換行、列變高；不勾＝字縮小塞進固定列高）</label>' +
+      '<div class="btnrow">' + btn('rowsUniform', '資料列高全部一致') + '</div>');
+    h += fold('ftMore', '進階（列出哪一層、小數位、框線）', '<div class="grid2">' + field('列出哪一層', sel('ov', el.ov || '', [['', '全部']].concat(Object.keys(App.P.ovs).map(function (k) { return [k, App.P.ovs[k].name]; })))) +
+      field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || '')) +
+      field('面積小數位', inp('decimals', el.decimals, 'number', 'step="1" min="0" max="4"')) + field('框線寬', inp('lw', el.lw == null ? 0.24 : el.lw, 'number', 'step="0.01" min="0"')) + '</div>');
     return h;
   }
   function bindTableCellEditor(box, el) {
@@ -1801,14 +1883,15 @@
       if (f.short) shortBuf.push(field(f.label, html)); else { flushShort(); h += field(f.label + ' <code>{' + f.key + '}</code>', html); }
     });
     flushShort();
-    h += '<div class="btnrow">' + btn('today', '核定日期填今天') + '</div>';
+    h += '<div class="btnrow"><span class="small">填今天：</span>' + btn('todayRecv', '收件日期') + btn('todaySurvey', '鑑測日期') + btn('today', '核定日期') + '</div>';
     box.innerHTML = h;
     bind(box, F);
     $$('[data-k]', box).forEach(function (i) { i.addEventListener('change', function () { savePref(i.dataset.k, i.value); }); });
     box.onclick = function (ev) {
       var a = ev.target.closest('[data-act]'); if (!a) return;
-      if (a.dataset.act === 'today') {
-        var d = new Date(); F.apY = String(d.getFullYear() - 1911); F.apM = String(d.getMonth() + 1); F.apD = String(d.getDate());
+      var pre = { today: 'ap', todayRecv: 'recv', todaySurvey: 'survey' }[a.dataset.act];
+      if (pre) {
+        var d = new Date(); F[pre + 'Y'] = String(d.getFullYear() - 1911); F[pre + 'M'] = String(d.getMonth() + 1); F[pre + 'D'] = String(d.getDate());
         renderCaseTab(); render(); changed();
       }
     };
@@ -1841,7 +1924,7 @@
       list.forEach(function (f) {
         var a = parseFloat(R.featureArea(f, 2)) || 0; total += a;
         var sel2 = App.sel && App.sel.id === f.id ? ' class="on"' : '';
-        var calc = f.pt || !f.pts || f.pts.length < 3 ? '' : (G.area(f.pts) + (f.arcAdj || 0)).toFixed(2);
+        var calc = f.pt || !f.pts || f.pts.length < 3 ? '' : R.featCalc(f).toFixed(2);
         h += '<tr data-fid="' + f.id + '"' + sel2 + '><td><input data-f="code" value="' + R.esc(f.code) + '"></td>' +
           '<td><input data-f="areaOverride" class="num" placeholder="' + calc + '" value="' + R.esc(f.areaOverride == null ? '' : f.areaOverride) + '" title="空白＝系統計算值；可直接輸入內網計算系統的面積"></td>' +
           BC.map(function (c) { return '<td><input data-f="' + c.key + '" value="' + R.esc(f[c.key] || '') + '"></td>'; }).join('') +
@@ -1861,11 +1944,11 @@
     });
     h += '<p class="small">面積欄空白＝系統計算值（灰字），可直接填入內網計算系統的面積。輸入欄位跟著說明表的欄位走（在說明表屬性改「表格樣式」或欄位）。</p>';
     var FR = P.settings.faceRoles || { parcel: true, other: false };
-    h += '<details class="fold"><summary>點選成面設定</summary><div class="btnrow">' +
+    h += fold('faceSet', '點選成面設定、面積配賦', '<div class="btnrow">' +
       '<label class="inline"><input type="checkbox" data-fr="parcel"' + (FR.parcel !== false ? ' checked' : '') + '>地籍線當邊界</label>' +
       '<label class="inline"><input type="checkbox" data-fr="other"' + (FR.other ? ' checked' : '') + '>其他線當邊界</label></div>' +
       '<p class="small">Shift+點選：把相鄰區塊併入目前選取的說明項目。假合併的界線（打 X 的線）不會當邊界。</p>' +
-      '<div class="btnrow"><span class="small">面積配賦：登記總面積</span><input id="regArea" type="number" step="0.01" style="width:100px" value="' + (P.settings.regArea || '') + '">' + btn('distribute', '配賦') + '</div></details>';
+      '<div class="btnrow"><span class="small">面積配賦：登記總面積</span><input id="regArea" type="number" step="0.01" style="width:100px" value="' + (P.settings.regArea || '') + '">' + btn('distribute', '配賦') + '</div><p class="small">配賦只算目前編輯的那一層；標號、空白列不列入。</p>');
     box.innerHTML = h;
     $$('[data-fr]', box).forEach(function (c) { c.onchange = function () { P.settings.faceRoles = Object.assign({}, FR); P.settings.faceRoles[c.dataset.fr] = c.checked; changed(); }; });
     $$('[data-scheme]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.scheme].codeScheme = c.value; changed(); }; });
@@ -1960,21 +2043,21 @@
       });
       h += '</tbody></table>';
       h += '<p class="small">現況線和分割線在同一張 DXF 時：圖層不同就在上表指定；同圖層不同顏色就依顏色列指定；都一樣就用左側「歸屬」工具一條條點，或在線上按右鍵改。</p>';
-      var MG = P.merge, MI = R.mergeInfo(P, App.cad);
-      h += '<div class="sec">假合併（多筆地號合併後展示）</div>';
-      h += field('合併的地號（以頓號分隔）', '<input id="mgParcels" value="' + R.esc(MG.parcels || '') + '" placeholder="例：641、643、646">');
-      h += '<div class="grid2">' + field('原地號界線', '<select id="mgMode">' + [['x', '保留並打 X'], ['hide', '整條隱藏'], ['off', '不合併']].map(function (o) { return '<option value="' + o[0] + '"' + (MG.mode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>') +
+      var MG = P.merge, MI = R.mergeInfo(P, App.cad), nInt = Object.keys(MI.internal).length;
+      var mh = field('合併的地號（以頓號分隔）', '<input id="mgParcels" value="' + R.esc(MG.parcels || '') + '" placeholder="例：641、643、646">');
+      mh += '<div class="grid2">' + field('原地號界線', '<select id="mgMode">' + [['x', '保留並打 X'], ['hide', '整條隱藏'], ['off', '不合併']].map(function (o) { return '<option value="' + o[0] + '"' + (MG.mode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>') +
         field('X 大小 (mm)', '<input id="mgX" type="number" step="0.5" value="' + (MG.xSize || 3) + '">') + '</div>';
-      h += '<div class="btnrow">' + btn('mgDetect', '依圖上的 X 記號自動判斷') + '</div>';
-      h += '<p class="small">' + (MG.mode === 'off' ? '目前不合併。' : '找到界線 ' + Object.keys(MI.internal).length + ' 段' + (MI.missing.length ? '；找不到地號：' + R.esc(MI.missing.join('、')) : '')) + '　合併界線不會當作點選成面的邊界。</p>';
-    } else h += '<p class="small">尚未匯入圖資。請匯入內網套疊產出的整段地籍 DXF（例：486.dxf），也可同時選取案件 DXF（例：KC1117.dxf）一起套疊。</p>';
-    h += '<div class="sec">圖層顯示／鎖定</div><table class="flist lockt"><thead><tr><th>圖層</th><th>顯示</th><th>鎖定</th></tr></thead><tbody>';
-    [['parcel', '地籍線'], ['case', '現況'], ['split', '分割'], ['other', '其他線']].forEach(function (r) {
+      mh += '<div class="btnrow">' + btn('mgDetect', '依圖上的 X 記號自動判斷') + '</div>';
+      mh += '<p class="small">' + (MG.mode === 'off' ? '目前不合併。' : '找到界線 ' + nInt + ' 段' + (MI.missing.length ? '；找不到地號：' + R.esc(MI.missing.join('、')) : '')) + '　合併界線不會當作點選成面的邊界。</p>';
+      h += fold('merge', '假合併（多筆地號合併後展示）' + (nInt ? '<span class="tagc">' + nInt + ' 段</span>' : ''), mh, !!(MG.parcels || nInt));
+    } else h += '<div class="empty"><div class="emptyico">⇪</div><b>先匯入圖資</b><p>按上面的「匯入 DXF…」，選內網套疊產出的整段地籍 DXF（例：486.dxf）；可以同時選案件 DXF（例：KC1117.dxf）一起套疊。</p><p class="small">舊系統的 .m02 請用上方「開啟」。</p></div>';
+    if (App.cad) h += '<div class="sec">顯示／鎖定</div><table class="flist lockt"><thead><tr><th>圖層</th><th>顯示</th><th>鎖定</th></tr></thead><tbody>';
+    if (App.cad) [['parcel', '地籍線'], ['case', '現況'], ['split', '分割'], ['other', '其他線']].forEach(function (r) {
       var vis = P.ovs[r[0]] ? '<input type="checkbox" data-ovvis="' + r[0] + '"' + (P.ovs[r[0]].visible !== false ? ' checked' : '') + '>' : '<span class="small">—</span>';
       h += '<tr><td>' + r[1] + '</td><td>' + vis + '</td><td><input type="checkbox" data-lock="' + r[0] + '"' + (isLocked(r[0]) ? ' checked' : '') + '></td></tr>';
     });
-    h += '</tbody></table><p class="small">鎖定的圖層不會被點選、斷線、改歸屬或右鍵修改（仍可鎖點到它的交點）。</p>';
-    h += '<details class="fold"><summary>線條與文字樣式</summary>';
+    if (App.cad) h += '</tbody></table><p class="small">鎖定的圖層不會被點選、斷線、改歸屬或右鍵修改（仍可鎖點到它的交點）。</p>';
+    var sh = '', hKeep = h; h = '';
     h += '<div class="sec">線條樣式（依用途）</div><table class="flist"><thead><tr><th></th><th>顏色</th><th>線寬</th><th>線型</th></tr></thead><tbody>';
     [['parcelLine', '地籍線'], ['caseLine', '現況'], ['splitLine', '分割'], ['otherLine', '其他線']].forEach(function (r) {
       h += '<tr><td>' + r[1] + '</td><td>' + color(r[0] + '.color', S[r[0]].color) + '</td><td>' + inp(r[0] + '.width', S[r[0]].width, 'number', 'step="0.01"') + '</td><td>' + dashSel(r[0] + '.dash', S[r[0]].dash) + '</td></tr>';
@@ -1989,11 +2072,11 @@
     h += '<label class="inline">' + chk('autoAvoid', S.autoAvoid !== false) + ' 地號、編號自動避開線條（小幅移動；避不開就留原位，可再手動拖曳）</label>';
     h += '<label class="inline">' + chk('avoidCase', S.avoidCase !== false) + ' 非本案地號避開本案範圍（說明項目、本案地塊），避不開才壓在上面</label>';
     h += '<label class="inline">' + chk('hideTempNo', S.hideTempNo !== false) + ' 隱藏分割暫編地號（如 641(1)、635(2)）</label>';
-    h += '</details>';
+    h += '<label class="inline">' + chk('snapEdges', P.settings.snapEdges) + ' 移動元件時自動對齊其他元件邊緣</label>';
+    sh = h; h = hKeep + fold('styles', '線條、文字樣式與其他設定', sh);
     var hiddenN = Object.keys(P.segStyle).filter(function (k) { return P.segStyle[k] && P.segStyle[k].hidden; }).length;
     var hiddenT = Object.keys(P.textOver).filter(function (k) { return P.textOver[k] && P.textOver[k].hidden; }).length;
     if (hiddenN || hiddenT) h += '<div class="btnrow">' + (hiddenN ? btn('showSegs', '顯示被隱藏的線段（' + hiddenN + '）') : '') + (hiddenT ? btn('showTexts', '顯示被隱藏的文字（' + hiddenT + '）') : '') + '</div>';
-    h += '<div class="sec">畫面</div><label class="inline">' + chk('snapEdges', P.settings.snapEdges) + ' 移動元件時自動對齊其他元件邊緣</label>';
     box.innerHTML = h;
     bind(box, function () { return S; }, null);
     $$('[data-k=snapEdges]', box).forEach(function (i) { i.onchange = function () { P.settings.snapEdges = i.checked; }; });
@@ -2022,32 +2105,30 @@
   }
   function renderOutTab() {
     var box = $('#tab-out'), P = App.P, o = P.output.k8, h = '';
-    h += '<div class="sec">① A3 成果圖（1:1）</div>';
-    h += '<div class="grid2">' + field('紙寬 (mm)', inp('sheet.w', P.sheet.w, 'number')) + field('紙高 (mm)', inp('sheet.h', P.sheet.h, 'number')) +
+    h += '<div class="sec">A3 成果圖（1:1）</div>';
+    h += '<div class="btnrow">' + btn('printA3', '列印 A3 成果圖', 'primary big') + '</div>';
+    h += '<div class="sec">8K 圖紙套印（框選部分 1:1）</div>';
+    h += '<div id="k8Status">' + (o.region ? k8Status() : '<p class="small">尚未框選範圍；直接按列印會自動框選「說明表＋略圖」。</p>') + '</div>';
+    h += '<div class="btnrow">' + btn('print8k', '列印 8K 套印', 'primary big') + '</div>';
+    h += '<div class="btnrow"><span class="small">套印範圍</span>' + btn('regionAuto', '自動框選') + btn('region', '滑鼠框選 (R)') + '</div>';
+    var ph = '<p class="small"><b>A3</b></p><div class="grid2">' + field('紙寬 (mm)', inp('sheet.w', P.sheet.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('sheet.h', P.sheet.h, 'number', 'min="10"')) +
       field('印表位移 X (mm)', inp('sheet.dx', P.sheet.dx, 'number', 'step="0.1"')) + field('印表位移 Y (mm)', inp('sheet.dy', P.sheet.dy, 'number', 'step="0.1"')) + '</div>';
-    h += '<div class="btnrow">' + btn('printA3', '列印 A3 成果圖', 'primary') + '</div>';
-    h += '<div class="sec">② 8K 圖紙套印（框選部分 1:1）</div>';
-    h += '<div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number')) +
+    ph += '<p class="small"><b>8K</b>（紙夾標示 267×388，橫放：寬 388、高 267）</p><div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number', 'min="10"')) +
       field('左下平移 X (mm)', inp('output.k8.offX', o.offX, 'number', 'step="0.1"')) + field('左下平移 Y (mm)', inp('output.k8.offY', o.offY, 'number', 'step="0.1"')) +
       field('印表位移 X', inp('output.k8.dx', o.dx, 'number', 'step="0.1"')) + field('印表位移 Y', inp('output.k8.dy', o.dy, 'number', 'step="0.1"')) + '</div>';
-    if (o.region) {
-      h += '<div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
-        field('範圍寬', inp('output.k8.region.w', o.region.w, 'number', 'step="0.1"')) + field('範圍高', inp('output.k8.region.h', o.region.h, 'number', 'step="0.1"')) + '</div>';
-    } else h += '<p class="small">尚未設定範圍。</p>';
-    h += '<div class="btnrow">' + btn('regionAuto', '自動框選（說明表＋略圖）') + btn('region', '滑鼠框選 (R)') + '</div>';
-    h += '<div class="btnrow">' + btn('print8k', '列印 8K 套印', 'primary') + '</div>';
-    h += '<p class="small">自動框選＝左側說明欄右邊到外框右緣、外框頂端到略圖／說明表底部（不含主任、日期）。沒有框選時，列印 8K 會自動套用。</p>';
-    h += '<div class="sec">③ 送審核定後</div>';
-    h += '<p class="small">於「案件資料」填入核定日期（右下角「中華民國　年　月　日」自動帶入），再列印 A3。份數請在列印視窗設定' + (P.fields.copies ? '：本案 <b>' + R.esc(P.fields.copies) + '</b> 份' : '') + '。</p>';
-    h += '<div class="sec">列印注意</div><p class="small">列印視窗請選：目的地＝印表機或「另存為 PDF」、紙張＝A3（8K 用自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設/100%</b>，並勾選「背景圖形」。若印表機有固定偏移，可用上方「印表位移」校正。</p>';
-    h += '<div class="sec">範本</div><div class="btnrow">' + btn('saveTpl', '目前版面存成範本') + btn('exportTpl', '匯出範本檔') + btn('importTpl', '匯入範本檔') + '</div>';
+    if (o.region) ph += '<p class="small"><b>8K 套印範圍</b>（mm，可直接改數字）</p><div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
+      field('範圍寬', inp('output.k8.region.w', o.region.w, 'number', 'step="0.1" min="1"')) + field('範圍高', inp('output.k8.region.h', o.region.h, 'number', 'step="0.1" min="1"')) + '</div>';
+    ph += '<p class="small">印表機若有固定偏移，用「印表位移」校正。</p>';
+    h += fold('paper', '紙張、平移與位移設定', ph);
+    h += '<div class="note"><b>列印視窗請這樣設定</b><br>紙張＝A3（8K 選紙夾的 8K 自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設 100%</b>，勾選「背景圖形」。<br>送審核定後：到「案件資料」填核定日期，再印一次 A3' + (P.fields.copies ? '（本案 <b>' + R.esc(P.fields.copies) + '</b> 份）' : '') + '。</div>';
+    h += fold('tpl', '版面範本', '<p class="small">把目前的版面存成範本，開新案件時選用；匯出成檔案可以帶到別台電腦。</p><div class="btnrow">' + btn('saveTpl', '目前版面存成範本') + btn('exportTpl', '匯出範本檔') + btn('importTpl', '匯入範本檔') + '</div>');
     box.innerHTML = h;
-    bind(box, P, function () { render(); });
+    bind(box, P, function () { render(); var ks = $('#k8Status', box); if (ks && o.region) ks.innerHTML = k8Status(); });
     box.onclick = function (ev) {
       var a = ev.target.closest('[data-act]'); if (!a) return;
       var act = a.dataset.act;
       if (act === 'printA3') { checkpoint(); Printer.printA3(P, App.cad); }
-      if (act === 'print8k') { if (!o.region) autoRegion(); checkpoint(); if (!Printer.print8K(P, App.cad)) toast('請先框選 8K 套印範圍'); }
+      if (act === 'print8k') { doPrint8K(); renderOutTab(); }
       if (act === 'region') setTool('region');
       if (act === 'regionAuto') { if (autoRegion()) { renderOutTab(); render(); changed(); toast('已自動框選 8K 套印範圍'); } else toast('找不到說明表或略圖'); }
       if (act === 'saveTpl') saveTemplate();
@@ -2101,10 +2182,29 @@
     switchPlan(j);
     P.plans.splice(i, 1); App.planCads.splice(i, 1);
     if (P.planIdx > i) P.planIdx--;
-    App.undo = []; App.redo = []; App.lastSnap = snap();
+    resetHistory();
     renderPlanSel(); autosave();
   }
 
+  /* 8K 列印：範圍比直式紙張寬、橫式放得下時自動改橫式；怎麼放都放不下就先提醒，不會默默裁掉 */
+  function doPrint8K() {
+    var P = App.P;
+    if (!P.output.k8.region) autoRegion();
+    checkpoint();
+    if (!P.output.k8.region) { toast('請先框選 8K 套印範圍'); switchTab('out'); return; }
+    var pg = Printer.k8Page(P);
+    if (!pg.fits && !confirm('8K 套印範圍比紙張大，超出的部分會印不出來：\n' +
+      (pg.overW > 0 ? '・寬度超出 ' + round(pg.overW, 1) + ' mm\n' : '') + (pg.overH > 0 ? '・高度超出 ' + round(pg.overH, 1) + ' mm\n' : '') +
+      '（紙張 ' + pg.w + '×' + pg.h + ' mm，已含左下平移）\n\n按「確定」＝照樣列印\n按「取消」＝回「輸出」頁調整範圍或紙張大小')) { switchTab('out'); return; }
+    if (pg.swapped) toast('套印範圍比直式紙張寬，已自動改用橫式 ' + pg.w + '×' + pg.h + ' mm 列印（紙張請橫放）', 6000);
+    Printer.print8K(P, App.cad);
+  }
+  function k8Status() {
+    var P = App.P, o = P.output.k8; if (!o.region) return '';
+    var pg = Printer.k8Page(P);
+    if (!pg.fits) return '<p class="small warn">⚠ 範圍比紙張大：' + (pg.overW > 0 ? '寬度超出 ' + round(pg.overW, 1) + ' mm　' : '') + (pg.overH > 0 ? '高度超出 ' + round(pg.overH, 1) + ' mm' : '') + '。超出的部分印不出來，請縮小範圍或修改紙張大小。</p>';
+    return '<p class="small">' + (pg.swapped ? '範圍比直式紙張寬，列印時會自動改用<b>橫式 ' + pg.w + '×' + pg.h + ' mm</b>（紙張請橫放）。' : '紙張寬 ' + pg.w + ' × 高 ' + pg.h + ' mm，範圍放得下。') + '</p>';
+  }
   /* 8K 套印範圍：左側說明欄右緣 → 外框右緣；外框頂端 → 略圖、說明表、指北針的最底部（不含主任、日期） */
   function autoRegion() {
     var P = App.P, B = function (e) { return R.bounds(e, P); };
@@ -2153,8 +2253,8 @@
       var tpl = v === '__builtin' ? null : v === '__current' ? templateData() : t[v];
       checkpoint();
       App.P = upgrade(M.newProject(tpl)); applyPrefs(App.P); App.cad = null; App.planCads = [null]; fileHandle = null;
-      App.undo = []; App.redo = []; App.lastSnap = snap(); App.sel = null;
-      dlg.close(); refreshAll(); fitView(); switchTab('case'); autosave();
+      resetHistory(); App.sel = null; App.selCell = null; setDirty(false);
+      dlg.close(); refreshAll(); fitView(); switchTab('layer'); autosave();
     };
   }
 
@@ -2189,6 +2289,7 @@
   /* ---------- 工具 ---------- */
   function setTool(t) {
     if (App.draw && t !== App.tool) App.draw = null;
+    if (t !== 'measure') App.measure = null;
     App.tool = t; App.snapPt = null;
     $$('[data-tool]').forEach(function (b) { b.classList.toggle('on', b.dataset.tool === t); });
     stage.dataset.tool = t;
@@ -2199,6 +2300,7 @@
       line: '畫現況線：逐點點選，雙擊或 Enter 完成（畫好後可在右側改線型、顏色）',
       sline: '畫分割線：逐點點選（自動鎖點），雙擊或 Enter 完成；畫好後可用「點選成面」切出分割範圍', break: '斷線：在線段上點一下，把它切成兩段，之後可分別設定線型（例如一段實線、一段虛線）', text: '文字：在略圖內點選＝圖面註記；在略圖外＝版面文字',
       region: '框選 8K 套印範圍：在版面上拖曳一個矩形',
+      measure: '量距離：在略圖內點兩點（自動鎖點）顯示實地距離；量完按 Enter 把距離標註到圖上，Esc 結束',
       assign: '改歸屬：先在畫面上方選「改成」哪一層，再點線段（Shift＝整串、拖曳＝框選）',
       lsel: '框選線段：在略圖內拖曳矩形，選取完全在框內的現況/分割線（不含地籍線），再到右側改歸屬或線型'
     };
@@ -2209,13 +2311,12 @@
   function refreshPanels() { renderProps(); renderLayerList(); if (App.tab) switchTab(App.tab); }
   function updateSteps() {
     var P = App.P, done = {
-      import: !!App.cad,
-      crop: maps().some(function (m) { return m.cx != null; }),
+      layer: !!App.cad,
       feat: P.features.length > 0,
       case: !!(P.fields.landNo && (P.fields.courtDoc || P.fields.matter)),
       out: false
     };
-    $$('.steps [data-step]').forEach(function (li) { li.classList.toggle('done', !!done[li.dataset.step]); });
+    $$('.tabs [data-tab]').forEach(function (b) { b.classList.toggle('done', !!done[b.dataset.tab]); });
   }
   function refreshAll() { refreshPanels(); renderPlanSel(); updateOvBadge(); updateSteps(); updateLockBar(); render(); }
 
@@ -2235,9 +2336,20 @@
     if (ev.key === 'Escape' && App.tableEdit) { setTableEdit(null); return; }
     if (ev.key === 'Escape') { if (App.draw) { App.draw = null; render(); } else if (App.tool !== 'select') setTool('select'); else select(null); return; }
     if (ev.key === 'Enter' && App.draw) { finishDraw(); return; }
+    if (ev.key === 'Enter' && App.tool === 'measure' && App.measure && App.measure.b) { measureToAnno(); return; }
+    if (ev.key === 'Escape' && App.measure) { App.measure = null; render(); return; }
+    if (ctrl && ev.key.toLowerCase() === 'c' && App.sel && App.sel.kind === 'el' && !String(window.getSelection && window.getSelection()).length) {
+      var ce = elById(App.sel.id); if (ce) { App.clip = clone(ce); toast('已複製「' + (ce.name || '元件') + '」，按 Ctrl+V 貼上', 1500); } return;
+    }
+    if (ctrl && ev.key.toLowerCase() === 'v' && App.clip) {
+      ev.preventDefault();
+      var pe = clone(App.clip); pe.id = M.uid(); pe.x = round((pe.x || 0) + 5, 2); pe.y = round((pe.y || 0) + 5, 2); delete pe.stackBelow; delete pe.matchWidth;
+      App.clip.x = pe.x; App.clip.y = pe.y;   // 連續貼上時逐次錯開
+      App.P.elements.push(pe); select({ kind: 'el', id: pe.id }); changed(); renderLayerList(); return;
+    }
     if (ev.key === 'Backspace' && App.draw) { App.draw.pts.pop(); if (!App.draw.pts.length) App.draw = null; render(); ev.preventDefault(); return; }
     if (ev.key === 'Delete' || ev.key === 'Backspace') { deleteSel(); ev.preventDefault(); return; }
-    var map = { v: 'select', h: 'pan', f: 'face', m: 'mark', p: 'poly', l: 'line', s: 'sline', b: 'break', t: 'text', r: 'region', q: 'lsel', a: 'assign' };
+    var map = { v: 'select', h: 'pan', f: 'face', m: 'mark', p: 'poly', l: 'line', s: 'sline', b: 'break', t: 'text', r: 'region', q: 'lsel', a: 'assign', d: 'measure' };
     // 選取線段時：1＝現況、2＝分割
     if (App.sel && App.sel.kind === 'seg' && (ev.key === '1' || ev.key === '2')) {
       var rr = ev.key === '1' ? 'case' : 'split';
@@ -2252,7 +2364,7 @@
       if (App.sel.kind === 'el') { var el = elById(App.sel.id); if (el && !el.locked) { el.x = round(el.x + dx, 2); el.y = round(el.y + dy, 2); } updateGeomFields(); }
       else if (App.sel.mapId) {
         var m = elById(App.sel.mapId), k = 1000 / m.scale, wdx = dx / k, wdy = -dy / k;
-        if (App.sel.kind === 'flabel' || App.sel.kind === 'feature') { var f = featById(App.sel.id), lp = f.labelAt || R.featAnchor(f) || G.labelPoint(f.pts); f.labelAt = [lp[0] + wdx, lp[1] + wdy]; }
+        if (App.sel.kind === 'flabel' || App.sel.kind === 'feature') { var f = featById(App.sel.id), lp = f && (f.labelAt || R.featAnchor(f)); if (lp) { if (f.pt && !f.labelAt) f.pt = [f.pt[0] + wdx, f.pt[1] + wdy]; else f.labelAt = [lp[0] + wdx, lp[1] + wdy]; } }
         else if (App.sel.kind === 'anno') { var a = App.P.annos.filter(function (x) { return x.id === App.sel.id; })[0]; a.x += wdx; a.y += wdy; }
         else if (App.sel.kind === 'ptext') { var t = App.cad.texts[App.sel.idx], ov = App.P.textOver[App.sel.idx] = App.P.textOver[App.sel.idx] || {}; ov.x = (ov.x != null ? ov.x : t.x) + wdx; ov.y = (ov.y != null ? ov.y : t.y) + wdy; }
       }
@@ -2268,7 +2380,7 @@
     svg.addEventListener('pointerup', onUp);
     svg.addEventListener('pointercancel', onUp);
     svg.addEventListener('wheel', function (ev) { closeCtx(); onWheel(ev); }, { passive: false });
-    svg.addEventListener('contextmenu', function (ev) { ev.preventDefault(); if (drag) return; openCtx(ev); });
+    svg.addEventListener('contextmenu', function (ev) { ev.preventDefault(); if (drag) return; if (App.draw) { finishDraw(); return; } openCtx(ev); });
     document.addEventListener('pointerdown', function (ev) { if (!ev.target.closest('#ctx')) closeCtx(); }, true);
     $('#lockBar').addEventListener('click', function (ev) { var b = ev.target.closest('[data-lockq]'); if (b) setLock(b.dataset.lockq, !isLocked(b.dataset.lockq)); });
     $('#assignBar').addEventListener('click', function (ev) { var b = ev.target.closest('[data-assign]'); if (b) { App.assignTo = b.dataset.assign; renderAssignBar(); } });
@@ -2288,25 +2400,21 @@
       if (openDD) { openDD.classList.toggle('open'); return; }
       if (ev.target.closest('.ddmenu [data-cmd]')) $$('.dd.open').forEach(function (d) { d.classList.remove('open'); });
     });
-    // 作業步驟
-    $('.steps').addEventListener('click', function (ev) {
-      var li = ev.target.closest('[data-step]'); if (!li) return;
-      var st = li.dataset.step;
-      if (st === 'import') { if (!App.cad) importDXF(); else { switchTab('layer'); toast('已有圖資；要再匯入請按「匯入 DXF」'); } }
-      if (st === 'crop') { var m = maps()[0]; if (m) { select({ kind: 'el', id: m.id }); setTool('pan'); } }
-      if (st === 'feat') { switchTab('feat'); setTool('face'); }
-      if (st === 'case') { switchTab('case'); setTool('select'); }
-      if (st === 'out') { switchTab('out'); setTool('select'); }
-    });
+    // 收合區塊的開合狀態（toggle 不會冒泡，用捕獲階段收）
+    document.addEventListener('toggle', function (ev) { var d = ev.target; if (d && d.dataset && d.dataset.fold) App.folds[d.dataset.fold] = d.open; }, true);
     document.addEventListener('click', function (ev) {
       var b = ev.target.closest('[data-cmd]'); if (!b || b.closest('dialog') || b.closest('#props') || b.closest('.tabpane')) return;
       var c = b.dataset.cmd;
       if (c === 'new') newCase(); else if (c === 'open') openProject(); else if (c === 'save') saveProject(false); else if (c === 'saveas') saveProject(true);
       else if (c === 'import') importDXF(); else if (c === 'undo') undo(); else if (c === 'redo') redo();
-      else if (c === 'fit') fitView(); else if (c === 'zin' || c === 'zout') { App.view.z *= c === 'zin' ? 1.25 : 0.8; render(); }
+      else if (c === 'fit') fitView(); else if (c === 'zin' || c === 'zout') {   // 以畫面中心為基準縮放
+        var zr = stage.getBoundingClientRect(), zx = App.view.ox + zr.width / App.view.z / 2, zy = App.view.oy + zr.height / App.view.z / 2;
+        App.view.z = Math.max(0.3, Math.min(60, App.view.z * (c === 'zin' ? 1.25 : 0.8)));
+        App.view.ox = zx - zr.width / App.view.z / 2; App.view.oy = zy - zr.height / App.view.z / 2; render();
+      }
       else if (c === 'z100') { var r = stage.getBoundingClientRect(), cx = App.view.ox + r.width / App.view.z / 2, cy = App.view.oy + r.height / App.view.z / 2; App.view.z = 96 / 25.4; App.view.ox = cx - r.width / App.view.z / 2; App.view.oy = cy - r.height / App.view.z / 2; render(); }
       else if (c === 'printA3') { checkpoint(); Printer.printA3(App.P, App.cad); }
-      else if (c === 'print8k') { if (!App.P.output.k8.region) autoRegion(); checkpoint(); if (!Printer.print8K(App.P, App.cad)) { toast('請先框選 8K 套印範圍'); switchTab('out'); } }
+      else if (c === 'print8k') doPrint8K();
       else if (c.indexOf('add-') === 0) addElement(c.slice(4));
       else if (c === 'help') $('#dlgHelp').showModal();
       else if (c === 'planAdd') addPlan(); else if (c === 'planRen') renamePlan(); else if (c === 'planDel') deletePlan();
@@ -2321,9 +2429,11 @@
     });
 
     applyPrefs(App.P);
-    App.lastSnap = snap();
+    resetHistory(); setDirty(false);
+    Printer.titleFn = defaultName; Printer.titleRestore = updateTitle;   // 另存 PDF 的預設檔名＝專案名稱
+    window.addEventListener('beforeunload', function (ev) { if (App.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
     setTool('select');
-    switchTab('case');
+    switchTab('layer');
     renderLayerList(); renderProps(); renderPlanSel(); updateOvBadge(); updateLockBar();
     fitView();
     // 還原自動暫存
