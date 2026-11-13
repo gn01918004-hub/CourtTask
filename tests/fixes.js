@@ -61,7 +61,7 @@ const ROOT = path.join(__dirname, '..');
   await pg.evaluate(() => App.api.setTool('mark')); await pg.mouse.click(p.x, p.y); await pg.waitForTimeout(200); await pg.keyboard.press('ArrowLeft'); await pg.waitForTimeout(100);
   ok(!errs.length, '標號選取與方向鍵微調不報錯', errs.splice(0));
   // 數字欄清空、比例尺 0 不會寫入
-  await pg.evaluate(() => { App.api.setTool('select'); const m = App.P.elements.find(e => e.type === 'map'); App.api.selectFn({ kind: 'el', id: m.id }); });
+  await pg.evaluate(() => { App.api.setTool('select'); App.folds.geo = true; const m = App.P.elements.find(e => e.type === 'map'); App.api.selectFn({ kind: 'el', id: m.id }); });
   await pg.fill('#props [data-k=scale]', ''); await pg.fill('#props [data-k=scale]', '0'); await pg.fill('#props [data-k=x]', ''); await pg.waitForTimeout(200);
   r = await pg.evaluate(() => { const m = App.P.elements.find(e => e.type === 'map'); return [m.scale, m.x]; });
   ok(r[0] === 500 && r[1] === 168.4 && !errs.length, '數字欄清空或填 0 時保留原值', { r, errs: errs.splice(0) });

@@ -14,13 +14,15 @@
     undo: [], redo: [], lastSnap: null,
     draw: null,         // 繪製中的多邊形 / 線
     guides: [], snapPt: null, space: false,
-    planCads: [null]    // 各方案的圖資（可共用同一份）
+    planCads: [null],   // 各方案的圖資（可共用同一份）
+    folds: {}           // 面板裡各收合區塊的開合狀態
   };
   var svg, stage;
 
   /* ================= 工具 ================= */
   function toast(msg, ms) {
     var t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    var lm = $('#lastMsg'); if (lm) { lm.textContent = msg; lm.title = '最近一則訊息：' + msg; }   // 訊息消失後仍留在狀態列
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('show'); }, ms || 2600);
   }
   function round(v, d) { var k = Math.pow(10, d == null ? 2 : d); return Math.round(v * k) / k; }
@@ -169,7 +171,7 @@
   }
   function defaultName() {
     var f = App.P.fields;
-    return f.caseName || ((f.section || '') + (f.landNo || '') + '略圖') || '未命名';
+    return f.caseName || (f.section || f.landNo ? (f.section || '') + (f.landNo || '') + '略圖' : '未命名');
   }
   function download(name, text, type) {
     var blob = new Blob([text], { type: type || 'application/octet-stream' });
@@ -1445,6 +1447,11 @@
   function arrowSel(k, v) { return sel(k, v || '', [['', '無'], ['end', '終點箭頭 →'], ['start', '起點箭頭 ←'], ['both', '兩端箭頭 ↔']]); }
   function color(k, v) { return '<input data-k="' + k + '" type="color" value="' + (v || '#000000') + '">'; }
   function ta(k, v, rows) { return '<textarea data-k="' + k + '" rows="' + (rows || 3) + '">' + R.esc(v == null ? '' : v) + '</textarea>'; }
+  /* 可收合的區塊：開合狀態記在 App.folds，面板重畫後不會彈回去 */
+  function fold(key, title, inner, defOpen) {
+    var open = App.folds[key] != null ? App.folds[key] : !!defOpen;
+    return '<details class="fold" data-fold="' + key + '"' + (open ? ' open' : '') + '><summary>' + title + '</summary><div class="foldbody">' + inner + '</div></details>';
+  }
   function btn(act, label, cls) { return '<button data-act="' + act + '" class="' + (cls || '') + '">' + label + '</button>'; }
 
   /* 通用綁定：data-k 對應 target[k]（支援 a.b） */
@@ -1474,42 +1481,39 @@
   function renderProps() {
     var box = $('#props'), s = App.sel, P = App.P, h = '';
     if (!s) {
-      box.innerHTML = '<div class="hint"><b>操作提示</b><ul>' +
-        '<li>點選元件可移動，拖拉控制點可縮放；移動時會自動對齊其他元件（按住 Alt 取消對齊）。</li>' +
-        '<li>略圖框：框內拖曳＝移圖（換裁切位置），拖框線＝移動框；裁好可在右鍵「鎖定裁切」。</li>' +
-        '<li>表格：<b>雙擊</b>進入編輯，才可拉格線、點格子、Shift 多選合併；Esc 結束。</li>' +
-        '<li><b>右鍵</b>：線段可改圖層、線型、粗細、顏色、斷線；其他物件也有常用功能。</li>' +
-        '<li>畫布右上角「鎖定」：鎖住不想動到的圖層（地籍線預設鎖定）。</li>' +
-        '<li>滾輪縮放；空白鍵或中鍵拖曳平移。Ctrl+Z 復原、Ctrl+S 儲存、Delete 刪除。</li></ul></div>';
+      box.innerHTML = '<div class="empty"><div class="emptyico">↖</div><b>尚未選取</b>' +
+        '<p>點一下圖上的元件、線段、地號或編號，這裡會顯示可以調整的項目。</p>' +
+        '<p class="small">在圖上按<b>右鍵</b>有常用功能；完整的操作說明在右上角「？」。</p></div>';
       return;
     }
     if (s.kind === 'el') {
       var el = elById(s.id); if (!el) { box.innerHTML = ''; return; }
       var TYPE = { text: '文字', rect: '矩形框', line: '線', table: '表格', ftable: '說明表', north: '指北針', map: '略圖框' };
-      h += '<div class="ptitle">' + TYPE[el.type] + '<small>' + R.esc(el.name || '') + '</small></div>';
-      h += field('名稱', inp('name', el.name));
+      h += '<div class="ptitle">' + TYPE[el.type] + (el.name && el.name !== TYPE[el.type] ? '<small>' + R.esc(el.name) + '</small>' : '') + '</div>';
       var isTbl = el.type === 'table' || el.type === 'ftable';
-      h += '<div class="grid2">' + field('X (mm)', inp('x', el.x, 'number', 'step="0.1"')) + field('Y (mm)', inp('y', el.y, 'number', 'step="0.1"'));
-      if (!isTbl) h += field(el.type === 'line' ? 'ΔX' : '寬 (mm)', inp('w', el.w, 'number', 'step="0.1"')) + field(el.type === 'line' ? 'ΔY' : '高 (mm)', inp('h', el.h, 'number', 'step="0.1"'));
-      h += '</div>';
       if (el.type === 'text') {
         h += field('內容（可用 {欄位}，如 {landNo}、{scale}）', ta('text', el.text, 3));
-        h += '<div class="grid2">' + field('字高 (mm)', inp('fs', el.fs, 'number', 'step="0.1"')) + field('字距 (mm)', inp('ls', el.ls || 0, 'number', 'step="0.1"')) +
+        h += '<div class="grid2">' + field('字高 (mm)', inp('fs', el.fs, 'number', 'step="0.1" min="0.5"')) +
+          field('水平', sel('align', el.align, [['left', '靠左'], ['center', '置中'], ['right', '靠右']])) + '</div>';
+        h += fold('textMore', '更多文字設定', '<div class="grid2">' + field('字距 (mm)', inp('ls', el.ls || 0, 'number', 'step="0.1"')) +
           field('字型', sel('font', el.font || 'kai', [['kai', '標楷體'], ['sans', '黑體/Arial']])) + field('顏色', color('color', el.color || '#000000')) +
-          field('水平', sel('align', el.align, [['left', '靠左'], ['center', '置中'], ['right', '靠右']])) + field('垂直', sel('valign', el.valign, [['top', '靠上'], ['middle', '置中'], ['bottom', '靠下']])) +
-          field('排版', sel('fit', el.fit || '', [['', '自動換行'], ['shrink', '縮小以符合']])) + field('框線', chk('border', el.border)) + '</div>';
+          field('垂直', sel('valign', el.valign, [['top', '靠上'], ['middle', '置中'], ['bottom', '靠下']])) +
+          field('排版', sel('fit', el.fit || '', [['', '自動換行'], ['shrink', '縮小以符合']])) + field('框線', chk('border', el.border)) + '</div>');
       }
       if (el.type === 'rect' || el.type === 'line') {
-        h += '<div class="grid2">' + field('線寬 (mm)', inp('lw', el.lw || 0.24, 'number', 'step="0.01"')) + field('顏色', color('color', el.color || '#000000')) +
+        h += '<div class="grid2">' + field('線寬 (mm)', inp('lw', el.lw || 0.24, 'number', 'step="0.01" min="0.01"')) + field('顏色', color('color', el.color || '#000000')) +
           field('線型', dashSel('dash', el.dash)) + (el.type === 'line' ? field('箭頭', arrowSel('arrow', el.arrow)) : '') + '</div>';
       }
       if (el.type === 'north') h += field('文字', inp('label', el.label || '北'));
       if (el.type === 'map') h += mapProps(el);
-      if (el.type === 'table' || el.type === 'ftable') h += '<div class="btnrow">' + (App.tableEdit === el.id ? btn('tedit', '結束表格編輯 (Esc)', 'primary') : btn('tedit', '編輯表格（或雙擊表格）')) + '</div>';
+      if (isTbl) h += '<div class="btnrow">' + (App.tableEdit === el.id ? btn('tedit', '結束表格編輯 (Esc)', 'primary') : btn('tedit', '編輯表格（或雙擊表格）')) + '</div>';
       if (el.type === 'table') h += tableProps(el);
       if (el.type === 'ftable') h += ftableProps(el);
-      h += '<div class="btnrow">' + btn('front', '移到最上層') + btn('back', '移到最下層') + btn('dup', '複製') + '</div>';
-      h += '<div class="btnrow">' + '<label class="inline">' + chk('locked', el.locked) + ' 鎖定</label>' + btn('del', '刪除', 'danger') + '</div>';
+      var geo = field('名稱', inp('name', el.name)) + '<div class="grid2">' + field('X (mm)', inp('x', el.x, 'number', 'step="0.1"')) + field('Y (mm)', inp('y', el.y, 'number', 'step="0.1"'));
+      if (!isTbl) geo += field(el.type === 'line' ? 'ΔX' : '寬 (mm)', inp('w', el.w, 'number', 'step="0.1"')) + field(el.type === 'line' ? 'ΔY' : '高 (mm)', inp('h', el.h, 'number', 'step="0.1"'));
+      geo += '</div><div class="btnrow">' + btn('front', '移到最上層') + btn('back', '移到最下層') + '</div>';
+      h += fold('geo', '位置、大小與圖層順序', geo);
+      h += '<div class="btnrow foot">' + '<label class="inline">' + chk('locked', el.locked) + ' 鎖定位置</label>' + btn('dup', '複製') + btn('del', '刪除', 'danger') + '</div>';
       box.innerHTML = h;
       bind(box, el, function (k) { if (k === 'name') renderLayerList(); if (k === 'locked') render(); });
       bindTableCellEditor(box, el);
@@ -1530,12 +1534,12 @@
       h += field('備註（如門牌、倉庫）', inp('note', f.note));
       h += '<div class="grid2">' + field('所有權人', inp('owner', f.owner)) + field('其他（自訂欄）', inp('extra', f.extra)) + '</div>';
       h += field('面積（空白＝自動計算）', inp('areaOverride', f.areaOverride == null ? '' : f.areaOverride, 'text', 'placeholder="' + R.featCalc(f).toFixed(2) + '"'));
-      h += '<div class="grid2">' + field('顯示外框', chk('outline', f.outline)) + field('外框線型', dashSel('dash', f.dash)) +
-        field('外框線寬', inp('lw', f.lw || P.styles.caseLine.width, 'number', 'step="0.01"')) + field('外框顏色', color('color', f.color || P.styles.caseLine.color)) +
+      h += fold('featShow', '圖上的顯示方式（外框、填色、編號）', '<div class="grid2">' + field('顯示外框', chk('outline', f.outline)) + field('外框線型', dashSel('dash', f.dash)) +
+        field('外框線寬', inp('lw', f.lw || P.styles.caseLine.width, 'number', 'step="0.01" min="0.01"')) + field('外框顏色', color('color', f.color || P.styles.caseLine.color)) +
         field('填色', '<span class="row">' + chk('fillOn', !!f.fill) + color('fillColor', f.fill || '#ffcccc') + '</span>') +
-        field('顯示編號', chk('label', f.label !== false)) + field('編號字高', inp('labelSize', f.labelSize || P.styles.featureLabel.size, 'number', 'step="0.1"')) +
+        field('顯示編號', chk('label', f.label !== false)) + field('編號字高', inp('labelSize', f.labelSize || P.styles.featureLabel.size, 'number', 'step="0.1" min="0.5"')) +
         field('編號引線（小區塊用）', chk('leader', f.leader)) +
-        field('不列入說明表', chk('hideInTable', f.hideInTable)) + '</div>';
+        field('不列入說明表', chk('hideInTable', f.hideInTable)) + '</div>');
       h += '<div class="btnrow">' + btn('resetLabel', '編號位置重設') + btn('del', '刪除', 'danger') + '</div>';
       h += '<p class="small">拖曳藍色頂點可修改形狀（會自動鎖點）。用「點選成面」時按住 Shift 點相鄰區塊，可併入此說明項目。' + (f.arcAdj ? '（含圓弧修正 ' + f.arcAdj.toFixed(4) + ' m²）' : '') + '</p>';
       box.innerHTML = h;
@@ -1626,24 +1630,24 @@
 
   function mapProps(el) {
     var presets = [100, 200, 250, 300, 500, 600, 1000, 1200, 2000, 2500, 3000, 5000];
-    var h = '<div class="sec">比例尺與裁切</div>';
-    h += '<div class="grid2">' + field('比例尺 1/', inp('scale', el.scale, 'number', 'step="1" min="1" list="scaleList"')) +
-      field('常用', sel('_preset', '', [['', '選擇…']].concat(presets.map(function (p) { return [p, '1/' + p]; })))) + '</div>';
+    var h = '<div class="grid2">' + field('比例尺 1/', inp('scale', el.scale, 'number', 'step="1" min="1" list="scaleList"')) +
+      field('常用比例尺', sel('_preset', '', [['', '選擇…']].concat(presets.map(function (p) { return [p, '1/' + p]; })))) + '</div>';
     h += '<datalist id="scaleList">' + presets.map(function (p) { return '<option value="' + p + '">'; }).join('') + '</datalist>';
     var k = 1000 / el.scale;
     h += '<div class="grid2">' + field('裁切寬 (cm)', '<input data-geo="w" type="number" step="0.1" value="' + round(el.w / 10, 2) + '">') +
       field('裁切高 (cm)', '<input data-geo="h" type="number" step="0.1" value="' + round(el.h / 10, 2) + '">') + '</div>';
     h += '<p class="small">實地範圍：' + round(el.w / k, 2) + ' × ' + round(el.h / k, 2) + ' 公尺</p>';
-    h += '<div class="grid2">' + field('中心 E (TWD97)', inp('cx', el.cx, 'number', 'step="0.001"')) + field('中心 N (TWD97)', inp('cy', el.cy, 'number', 'step="0.001"')) + '</div>';
-    h += '<div class="btnrow">' + btn('centerCase', '置中：案件線') + btn('centerTarget', '置中：本案地號') + btn('centerFeat', '置中：說明項目') + '</div>';
+    h += '<div class="btnrow"><span class="small">置中到</span>' + btn('centerCase', '案件線') + btn('centerTarget', '本案地號') + btn('centerFeat', '說明項目') + '</div>';
+    h += '<label class="inline">' + chk('lockCrop', el.lockCrop) + ' 鎖定裁切（裁好後勾選，框內拖曳就不會移圖）</label>';
     var TSc = R.textScales(el);
-    h += '<div class="sec">文字大小倍率（此略圖框）</div><div class="grid3">' +
+    h += fold('mapText', '文字大小倍率（此略圖框）', '<div class="grid3">' +
       field('編號', '<input data-k="tsFeat" type="number" step="0.05" min="0.1" value="' + TSc.feat + '">') +
       field('本案地號', '<input data-k="tsTarget" type="number" step="0.05" min="0.1" value="' + TSc.target + '">') +
-      field('非本案地號', '<input data-k="tsParcel" type="number" step="0.05" min="0.1" value="' + TSc.parcel + '">') + '</div>';
-    h += '<div class="grid2">' + field('外框', chk('border', el.border !== false)) + field('框下顯示比例尺', chk('scaleLabel', el.scaleLabel)) + field('外框線寬', inp('lw', el.lw || 0.18, 'number', 'step="0.01"')) + field('白底（遮住下層）', chk('bg', el.bg !== false)) + '</div>';
-    h += '<label class="inline">' + chk('lockCrop', el.lockCrop) + ' 鎖定裁切（裁好後勾選，框內拖曳就不會移圖）</label>';
-    h += '<div class="btnrow">' + btn('exportDxf', '匯出裁切 DXF', 'primary') + '</div>';
+      field('非本案地號', '<input data-k="tsParcel" type="number" step="0.05" min="0.1" value="' + TSc.parcel + '">') + '</div>' +
+      '<p class="small">比例尺小（例如 1/2000）字擠在一起時，把倍率調小，例如 0.4。</p>');
+    h += fold('mapMore', '外框、中心座標、匯出 DXF', '<div class="grid2">' + field('中心 E (TWD97)', inp('cx', el.cx, 'number', 'step="0.001"')) + field('中心 N (TWD97)', inp('cy', el.cy, 'number', 'step="0.001"')) +
+      field('外框', chk('border', el.border !== false)) + field('框下顯示比例尺', chk('scaleLabel', el.scaleLabel)) + field('外框線寬', inp('lw', el.lw || 0.18, 'number', 'step="0.01" min="0.01"')) + field('白底（遮住下層）', chk('bg', el.bg !== false)) + '</div>' +
+      '<div class="btnrow">' + btn('exportDxf', '匯出裁切 DXF') + '</div>');
     return h;
   }
   function tableProps(el) {
@@ -1729,33 +1733,33 @@
   }
   var FT_KEYS = [['code', '編號／名稱'], ['area', '面積'], ['landNo', '地號'], ['note', '備註'], ['owner', '所有權人'], ['extra', '其他(自訂)']];
   function ftableProps(el) {
-    var h = '<div class="sec">說明表</div>';
-    var cur = tableStyleOf(el);
+    var h = '', cur = tableStyleOf(el);
     h += field('表格樣式', '<select data-act-sel="tstyle">' + (cur ? '' : '<option value="">（自訂欄位）</option>') + Object.keys(TABLE_STYLES).map(function (k) {
       return '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + TABLE_STYLES[k].name + '</option>'; }).join('') + '</select>');
-    h += field('標題（列高 0 = 不顯示標題列）', inp('title', el.title));
-    h += '<div class="grid2">' + field('列出哪一層', sel('ov', el.ov || '', [['', '全部']].concat(Object.keys(App.P.ovs).map(function (k) { return [k, App.P.ovs[k].name]; })))) +
-      field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || '')) + '</div>';
-    h += '<div class="grid2">' + field('標題列高', inp('titleH', el.titleH, 'number', 'step="0.1" min="0"')) + field('標題字高', inp('titleFs', el.titleFs, 'number', 'step="0.05"')) +
-      field('表頭列高（0=不顯示）', inp('headerH', el.headerH, 'number', 'step="0.1" min="0"')) + field('表頭字高', inp('headerFs', el.headerFs, 'number', 'step="0.05"')) +
-      field('資料列高(預設)', inp('rowH', el.rowH, 'number', 'step="0.1"')) + field('內容字高', inp('dataFs', el.dataFs, 'number', 'step="0.05"')) +
-      field('附註列高（0=不顯示）', inp('notesH', el.notesH, 'number', 'step="0.1" min="0"')) + field('附註字高', inp('notesFs', el.notesFs, 'number', 'step="0.05"')) +
-      field('面積小數位', inp('decimals', el.decimals, 'number', 'step="1" min="0" max="4"')) + field('框線寬', inp('lw', el.lw == null ? 0.24 : el.lw, 'number', 'step="0.01"')) + '</div>';
-    h += '<label class="inline">' + chk('autoRowH', el.autoRowH !== false) + ' 資料列高自動配合文字（文字多時自動換行、列變高；不勾＝字縮小塞進固定列高）</label>';
-    var otherT = App.P.elements.filter(function (e) { return e.type === 'ftable' && e.id !== el.id; })[0];
+    h += field('標題', inp('title', el.title));
+    h += field('附註文字', ta('notes', el.notes, 3));
     var pr3 = ftPair();
     if (pr3) h += '<div class="seg2"><span>兩張說明表</span><button data-act="stackJoin" class="' + (pr3.joined ? 'on' : '') + '">接在一起</button><button data-act="stackSplit" class="' + (pr3.joined ? '' : 'on') + '">分開擺放</button></div>';
-    h += '<div class="sec">欄位（可增減、調整順序）</div><table class="flist cols"><thead><tr><th>內容</th><th>表頭文字（\\n 換行）</th><th>寬</th><th>字高</th><th></th></tr></thead><tbody>';
+    h += '<p class="small">表格內容由左側「說明」頁的清單自動產生。</p>';
+    var colsH = '<table class="flist cols"><thead><tr><th>內容</th><th>表頭文字（\\n 換行）</th><th>寬</th><th>字高</th><th></th></tr></thead><tbody>';
     el.columns.forEach(function (c, i) {
-      h += '<tr data-ci="' + i + '"><td><select data-col="key">' + FT_KEYS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === c.key ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td>' +
+      colsH += '<tr data-ci="' + i + '"><td><select data-col="key">' + FT_KEYS.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === c.key ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select></td>' +
         '<td><input data-col="header" value="' + R.esc((c.header || '').replace(/\n/g, '\\n')) + '"></td>' +
         '<td><input data-col="w" type="number" step="0.1" value="' + el.cols[i] + '"></td>' +
         '<td><input data-col="fs" type="number" step="0.05" placeholder="' + el.dataFs + '" value="' + (c.fs || '') + '"></td>' +
         '<td class="ops"><button data-cop="up">↑</button><button data-cop="down">↓</button><button data-cop="del">✕</button></td></tr>';
     });
-    h += '</tbody></table><div class="btnrow">' + btn('colAdd', '新增欄位') + btn('rowsUniform', '資料列高全部一致') + '</div>';
-    h += field('附註文字', ta('notes', el.notes, 3));
-    h += '<p class="small">內容由左側「說明」頁的清單自動產生，修改說明項目資料即同步更新。</p>';
+    colsH += '</tbody></table><div class="btnrow">' + btn('colAdd', '新增欄位') + '</div>';
+    h += fold('ftCols', '欄位（增減、順序、表頭文字）', colsH);
+    h += fold('ftSize', '列高與字高', '<div class="grid2">' + field('標題列高（0=不顯示）', inp('titleH', el.titleH, 'number', 'step="0.1" min="0"')) + field('標題字高', inp('titleFs', el.titleFs, 'number', 'step="0.05" min="0.5"')) +
+      field('表頭列高（0=不顯示）', inp('headerH', el.headerH, 'number', 'step="0.1" min="0"')) + field('表頭字高', inp('headerFs', el.headerFs, 'number', 'step="0.05" min="0.5"')) +
+      field('資料列高(預設)', inp('rowH', el.rowH, 'number', 'step="0.1" min="1"')) + field('內容字高', inp('dataFs', el.dataFs, 'number', 'step="0.05" min="0.5"')) +
+      field('附註列高（0=不顯示）', inp('notesH', el.notesH, 'number', 'step="0.1" min="0"')) + field('附註字高', inp('notesFs', el.notesFs, 'number', 'step="0.05" min="0.5"')) + '</div>' +
+      '<label class="inline">' + chk('autoRowH', el.autoRowH !== false) + ' 資料列高自動配合文字（文字多時自動換行、列變高；不勾＝字縮小塞進固定列高）</label>' +
+      '<div class="btnrow">' + btn('rowsUniform', '資料列高全部一致') + '</div>');
+    h += fold('ftMore', '進階（列出哪一層、小數位、框線）', '<div class="grid2">' + field('列出哪一層', sel('ov', el.ov || '', [['', '全部']].concat(Object.keys(App.P.ovs).map(function (k) { return [k, App.P.ovs[k].name]; })))) +
+      field('只列此地號（空白＝全部）', inp('landFilter', el.landFilter || '')) +
+      field('面積小數位', inp('decimals', el.decimals, 'number', 'step="1" min="0" max="4"')) + field('框線寬', inp('lw', el.lw == null ? 0.24 : el.lw, 'number', 'step="0.01" min="0"')) + '</div>');
     return h;
   }
   function bindTableCellEditor(box, el) {
@@ -1940,11 +1944,11 @@
     });
     h += '<p class="small">面積欄空白＝系統計算值（灰字），可直接填入內網計算系統的面積。輸入欄位跟著說明表的欄位走（在說明表屬性改「表格樣式」或欄位）。</p>';
     var FR = P.settings.faceRoles || { parcel: true, other: false };
-    h += '<details class="fold"><summary>點選成面設定</summary><div class="btnrow">' +
+    h += fold('faceSet', '點選成面設定、面積配賦', '<div class="btnrow">' +
       '<label class="inline"><input type="checkbox" data-fr="parcel"' + (FR.parcel !== false ? ' checked' : '') + '>地籍線當邊界</label>' +
       '<label class="inline"><input type="checkbox" data-fr="other"' + (FR.other ? ' checked' : '') + '>其他線當邊界</label></div>' +
       '<p class="small">Shift+點選：把相鄰區塊併入目前選取的說明項目。假合併的界線（打 X 的線）不會當邊界。</p>' +
-      '<div class="btnrow"><span class="small">面積配賦：登記總面積</span><input id="regArea" type="number" step="0.01" style="width:100px" value="' + (P.settings.regArea || '') + '">' + btn('distribute', '配賦') + '</div></details>';
+      '<div class="btnrow"><span class="small">面積配賦：登記總面積</span><input id="regArea" type="number" step="0.01" style="width:100px" value="' + (P.settings.regArea || '') + '">' + btn('distribute', '配賦') + '</div><p class="small">配賦只算目前編輯的那一層；標號、空白列不列入。</p>');
     box.innerHTML = h;
     $$('[data-fr]', box).forEach(function (c) { c.onchange = function () { P.settings.faceRoles = Object.assign({}, FR); P.settings.faceRoles[c.dataset.fr] = c.checked; changed(); }; });
     $$('[data-scheme]', box).forEach(function (c) { c.onchange = function () { P.ovs[c.dataset.scheme].codeScheme = c.value; changed(); }; });
@@ -2039,21 +2043,21 @@
       });
       h += '</tbody></table>';
       h += '<p class="small">現況線和分割線在同一張 DXF 時：圖層不同就在上表指定；同圖層不同顏色就依顏色列指定；都一樣就用左側「歸屬」工具一條條點，或在線上按右鍵改。</p>';
-      var MG = P.merge, MI = R.mergeInfo(P, App.cad);
-      h += '<div class="sec">假合併（多筆地號合併後展示）</div>';
-      h += field('合併的地號（以頓號分隔）', '<input id="mgParcels" value="' + R.esc(MG.parcels || '') + '" placeholder="例：641、643、646">');
-      h += '<div class="grid2">' + field('原地號界線', '<select id="mgMode">' + [['x', '保留並打 X'], ['hide', '整條隱藏'], ['off', '不合併']].map(function (o) { return '<option value="' + o[0] + '"' + (MG.mode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>') +
+      var MG = P.merge, MI = R.mergeInfo(P, App.cad), nInt = Object.keys(MI.internal).length;
+      var mh = field('合併的地號（以頓號分隔）', '<input id="mgParcels" value="' + R.esc(MG.parcels || '') + '" placeholder="例：641、643、646">');
+      mh += '<div class="grid2">' + field('原地號界線', '<select id="mgMode">' + [['x', '保留並打 X'], ['hide', '整條隱藏'], ['off', '不合併']].map(function (o) { return '<option value="' + o[0] + '"' + (MG.mode === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>') +
         field('X 大小 (mm)', '<input id="mgX" type="number" step="0.5" value="' + (MG.xSize || 3) + '">') + '</div>';
-      h += '<div class="btnrow">' + btn('mgDetect', '依圖上的 X 記號自動判斷') + '</div>';
-      h += '<p class="small">' + (MG.mode === 'off' ? '目前不合併。' : '找到界線 ' + Object.keys(MI.internal).length + ' 段' + (MI.missing.length ? '；找不到地號：' + R.esc(MI.missing.join('、')) : '')) + '　合併界線不會當作點選成面的邊界。</p>';
-    } else h += '<p class="small">尚未匯入圖資。請匯入內網套疊產出的整段地籍 DXF（例：486.dxf），也可同時選取案件 DXF（例：KC1117.dxf）一起套疊。</p>';
-    h += '<div class="sec">圖層顯示／鎖定</div><table class="flist lockt"><thead><tr><th>圖層</th><th>顯示</th><th>鎖定</th></tr></thead><tbody>';
-    [['parcel', '地籍線'], ['case', '現況'], ['split', '分割'], ['other', '其他線']].forEach(function (r) {
+      mh += '<div class="btnrow">' + btn('mgDetect', '依圖上的 X 記號自動判斷') + '</div>';
+      mh += '<p class="small">' + (MG.mode === 'off' ? '目前不合併。' : '找到界線 ' + nInt + ' 段' + (MI.missing.length ? '；找不到地號：' + R.esc(MI.missing.join('、')) : '')) + '　合併界線不會當作點選成面的邊界。</p>';
+      h += fold('merge', '假合併（多筆地號合併後展示）' + (nInt ? '<span class="tagc">' + nInt + ' 段</span>' : ''), mh, !!(MG.parcels || nInt));
+    } else h += '<div class="empty"><div class="emptyico">⇪</div><b>先匯入圖資</b><p>按上面的「匯入 DXF…」，選內網套疊產出的整段地籍 DXF（例：486.dxf）；可以同時選案件 DXF（例：KC1117.dxf）一起套疊。</p><p class="small">舊系統的 .m02 請用上方「開啟」。</p></div>';
+    if (App.cad) h += '<div class="sec">顯示／鎖定</div><table class="flist lockt"><thead><tr><th>圖層</th><th>顯示</th><th>鎖定</th></tr></thead><tbody>';
+    if (App.cad) [['parcel', '地籍線'], ['case', '現況'], ['split', '分割'], ['other', '其他線']].forEach(function (r) {
       var vis = P.ovs[r[0]] ? '<input type="checkbox" data-ovvis="' + r[0] + '"' + (P.ovs[r[0]].visible !== false ? ' checked' : '') + '>' : '<span class="small">—</span>';
       h += '<tr><td>' + r[1] + '</td><td>' + vis + '</td><td><input type="checkbox" data-lock="' + r[0] + '"' + (isLocked(r[0]) ? ' checked' : '') + '></td></tr>';
     });
-    h += '</tbody></table><p class="small">鎖定的圖層不會被點選、斷線、改歸屬或右鍵修改（仍可鎖點到它的交點）。</p>';
-    h += '<details class="fold"><summary>線條與文字樣式</summary>';
+    if (App.cad) h += '</tbody></table><p class="small">鎖定的圖層不會被點選、斷線、改歸屬或右鍵修改（仍可鎖點到它的交點）。</p>';
+    var sh = '', hKeep = h; h = '';
     h += '<div class="sec">線條樣式（依用途）</div><table class="flist"><thead><tr><th></th><th>顏色</th><th>線寬</th><th>線型</th></tr></thead><tbody>';
     [['parcelLine', '地籍線'], ['caseLine', '現況'], ['splitLine', '分割'], ['otherLine', '其他線']].forEach(function (r) {
       h += '<tr><td>' + r[1] + '</td><td>' + color(r[0] + '.color', S[r[0]].color) + '</td><td>' + inp(r[0] + '.width', S[r[0]].width, 'number', 'step="0.01"') + '</td><td>' + dashSel(r[0] + '.dash', S[r[0]].dash) + '</td></tr>';
@@ -2068,11 +2072,11 @@
     h += '<label class="inline">' + chk('autoAvoid', S.autoAvoid !== false) + ' 地號、編號自動避開線條（小幅移動；避不開就留原位，可再手動拖曳）</label>';
     h += '<label class="inline">' + chk('avoidCase', S.avoidCase !== false) + ' 非本案地號避開本案範圍（說明項目、本案地塊），避不開才壓在上面</label>';
     h += '<label class="inline">' + chk('hideTempNo', S.hideTempNo !== false) + ' 隱藏分割暫編地號（如 641(1)、635(2)）</label>';
-    h += '</details>';
+    h += '<label class="inline">' + chk('snapEdges', P.settings.snapEdges) + ' 移動元件時自動對齊其他元件邊緣</label>';
+    sh = h; h = hKeep + fold('styles', '線條、文字樣式與其他設定', sh);
     var hiddenN = Object.keys(P.segStyle).filter(function (k) { return P.segStyle[k] && P.segStyle[k].hidden; }).length;
     var hiddenT = Object.keys(P.textOver).filter(function (k) { return P.textOver[k] && P.textOver[k].hidden; }).length;
     if (hiddenN || hiddenT) h += '<div class="btnrow">' + (hiddenN ? btn('showSegs', '顯示被隱藏的線段（' + hiddenN + '）') : '') + (hiddenT ? btn('showTexts', '顯示被隱藏的文字（' + hiddenT + '）') : '') + '</div>';
-    h += '<div class="sec">畫面</div><label class="inline">' + chk('snapEdges', P.settings.snapEdges) + ' 移動元件時自動對齊其他元件邊緣</label>';
     box.innerHTML = h;
     bind(box, function () { return S; }, null);
     $$('[data-k=snapEdges]', box).forEach(function (i) { i.onchange = function () { P.settings.snapEdges = i.checked; }; });
@@ -2101,34 +2105,30 @@
   }
   function renderOutTab() {
     var box = $('#tab-out'), P = App.P, o = P.output.k8, h = '';
-    h += '<div class="sec">① A3 成果圖（1:1）</div>';
-    h += '<div class="grid2">' + field('紙寬 (mm)', inp('sheet.w', P.sheet.w, 'number')) + field('紙高 (mm)', inp('sheet.h', P.sheet.h, 'number')) +
+    h += '<div class="sec">A3 成果圖（1:1）</div>';
+    h += '<div class="btnrow">' + btn('printA3', '列印 A3 成果圖', 'primary big') + '</div>';
+    h += '<div class="sec">8K 圖紙套印（框選部分 1:1）</div>';
+    h += '<div id="k8Status">' + (o.region ? k8Status() : '<p class="small">尚未框選範圍；直接按列印會自動框選「說明表＋略圖」。</p>') + '</div>';
+    h += '<div class="btnrow">' + btn('print8k', '列印 8K 套印', 'primary big') + '</div>';
+    h += '<div class="btnrow"><span class="small">套印範圍</span>' + btn('regionAuto', '自動框選') + btn('region', '滑鼠框選 (R)') + '</div>';
+    var ph = '<p class="small"><b>A3</b></p><div class="grid2">' + field('紙寬 (mm)', inp('sheet.w', P.sheet.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('sheet.h', P.sheet.h, 'number', 'min="10"')) +
       field('印表位移 X (mm)', inp('sheet.dx', P.sheet.dx, 'number', 'step="0.1"')) + field('印表位移 Y (mm)', inp('sheet.dy', P.sheet.dy, 'number', 'step="0.1"')) + '</div>';
-    h += '<div class="btnrow">' + btn('printA3', '列印 A3 成果圖', 'primary') + '</div>';
-    h += '<div class="sec">② 8K 圖紙套印（框選部分 1:1）</div>';
-    h += '<p class="small">8K 紙（紙夾標示 267×388）為<b>橫放</b>：寬 388、高 267。</p>';
-    h += '<div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number')) +
+    ph += '<p class="small"><b>8K</b>（紙夾標示 267×388，橫放：寬 388、高 267）</p><div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number', 'min="10"')) +
       field('左下平移 X (mm)', inp('output.k8.offX', o.offX, 'number', 'step="0.1"')) + field('左下平移 Y (mm)', inp('output.k8.offY', o.offY, 'number', 'step="0.1"')) +
       field('印表位移 X', inp('output.k8.dx', o.dx, 'number', 'step="0.1"')) + field('印表位移 Y', inp('output.k8.dy', o.dy, 'number', 'step="0.1"')) + '</div>';
-    if (o.region) {
-      h += '<div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
-        field('範圍寬', inp('output.k8.region.w', o.region.w, 'number', 'step="0.1"')) + field('範圍高', inp('output.k8.region.h', o.region.h, 'number', 'step="0.1"')) + '</div>';
-      h += '<div id="k8Status">' + k8Status() + '</div>';
-    } else h += '<p class="small">尚未設定範圍。</p>';
-    h += '<div class="btnrow">' + btn('regionAuto', '自動框選（說明表＋略圖）') + btn('region', '滑鼠框選 (R)') + '</div>';
-    h += '<div class="btnrow">' + btn('print8k', '列印 8K 套印', 'primary') + '</div>';
-    h += '<p class="small">自動框選＝左側說明欄右邊到外框右緣、外框頂端到略圖／說明表底部（不含主任、日期）。沒有框選時，列印 8K 會自動套用。</p>';
-    h += '<div class="sec">③ 送審核定後</div>';
-    h += '<p class="small">於「案件資料」填入核定日期（右下角「中華民國　年　月　日」自動帶入），再列印 A3。份數請在列印視窗設定' + (P.fields.copies ? '：本案 <b>' + R.esc(P.fields.copies) + '</b> 份' : '') + '。</p>';
-    h += '<div class="sec">列印注意</div><p class="small">列印視窗請選：目的地＝印表機或「另存為 PDF」、紙張＝A3（8K 用自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設/100%</b>，並勾選「背景圖形」。若印表機有固定偏移，可用上方「印表位移」校正。</p>';
-    h += '<div class="sec">範本</div><div class="btnrow">' + btn('saveTpl', '目前版面存成範本') + btn('exportTpl', '匯出範本檔') + btn('importTpl', '匯入範本檔') + '</div>';
+    if (o.region) ph += '<p class="small"><b>8K 套印範圍</b>（mm，可直接改數字）</p><div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
+      field('範圍寬', inp('output.k8.region.w', o.region.w, 'number', 'step="0.1" min="1"')) + field('範圍高', inp('output.k8.region.h', o.region.h, 'number', 'step="0.1" min="1"')) + '</div>';
+    ph += '<p class="small">印表機若有固定偏移，用「印表位移」校正。</p>';
+    h += fold('paper', '紙張、平移與位移設定', ph);
+    h += '<div class="note"><b>列印視窗請這樣設定</b><br>紙張＝A3（8K 選紙夾的 8K 自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設 100%</b>，勾選「背景圖形」。<br>送審核定後：到「案件資料」填核定日期，再印一次 A3' + (P.fields.copies ? '（本案 <b>' + R.esc(P.fields.copies) + '</b> 份）' : '') + '。</div>';
+    h += fold('tpl', '版面範本', '<p class="small">把目前的版面存成範本，開新案件時選用；匯出成檔案可以帶到別台電腦。</p><div class="btnrow">' + btn('saveTpl', '目前版面存成範本') + btn('exportTpl', '匯出範本檔') + btn('importTpl', '匯入範本檔') + '</div>');
     box.innerHTML = h;
-    bind(box, P, function () { render(); var ks = $('#k8Status', box); if (ks) ks.innerHTML = k8Status(); });
+    bind(box, P, function () { render(); var ks = $('#k8Status', box); if (ks && o.region) ks.innerHTML = k8Status(); });
     box.onclick = function (ev) {
       var a = ev.target.closest('[data-act]'); if (!a) return;
       var act = a.dataset.act;
       if (act === 'printA3') { checkpoint(); Printer.printA3(P, App.cad); }
-      if (act === 'print8k') doPrint8K();
+      if (act === 'print8k') { doPrint8K(); renderOutTab(); }
       if (act === 'region') setTool('region');
       if (act === 'regionAuto') { if (autoRegion()) { renderOutTab(); render(); changed(); toast('已自動框選 8K 套印範圍'); } else toast('找不到說明表或略圖'); }
       if (act === 'saveTpl') saveTemplate();
@@ -2254,7 +2254,7 @@
       checkpoint();
       App.P = upgrade(M.newProject(tpl)); applyPrefs(App.P); App.cad = null; App.planCads = [null]; fileHandle = null;
       resetHistory(); App.sel = null; App.selCell = null; setDirty(false);
-      dlg.close(); refreshAll(); fitView(); switchTab('case'); autosave();
+      dlg.close(); refreshAll(); fitView(); switchTab('layer'); autosave();
     };
   }
 
@@ -2311,13 +2311,12 @@
   function refreshPanels() { renderProps(); renderLayerList(); if (App.tab) switchTab(App.tab); }
   function updateSteps() {
     var P = App.P, done = {
-      import: !!App.cad,
-      crop: maps().some(function (m) { return m.cx != null; }),
+      layer: !!App.cad,
       feat: P.features.length > 0,
       case: !!(P.fields.landNo && (P.fields.courtDoc || P.fields.matter)),
       out: false
     };
-    $$('.steps [data-step]').forEach(function (li) { li.classList.toggle('done', !!done[li.dataset.step]); });
+    $$('.tabs [data-tab]').forEach(function (b) { b.classList.toggle('done', !!done[b.dataset.tab]); });
   }
   function refreshAll() { refreshPanels(); renderPlanSel(); updateOvBadge(); updateSteps(); updateLockBar(); render(); }
 
@@ -2401,16 +2400,8 @@
       if (openDD) { openDD.classList.toggle('open'); return; }
       if (ev.target.closest('.ddmenu [data-cmd]')) $$('.dd.open').forEach(function (d) { d.classList.remove('open'); });
     });
-    // 作業步驟
-    $('.steps').addEventListener('click', function (ev) {
-      var li = ev.target.closest('[data-step]'); if (!li) return;
-      var st = li.dataset.step;
-      if (st === 'import') { if (!App.cad) importDXF(); else { switchTab('layer'); toast('已有圖資；要再匯入請按「匯入 DXF」'); } }
-      if (st === 'crop') { var m = maps()[0]; if (m) { select({ kind: 'el', id: m.id }); setTool('pan'); } }
-      if (st === 'feat') { switchTab('feat'); setTool('face'); }
-      if (st === 'case') { switchTab('case'); setTool('select'); }
-      if (st === 'out') { switchTab('out'); setTool('select'); }
-    });
+    // 收合區塊的開合狀態（toggle 不會冒泡，用捕獲階段收）
+    document.addEventListener('toggle', function (ev) { var d = ev.target; if (d && d.dataset && d.dataset.fold) App.folds[d.dataset.fold] = d.open; }, true);
     document.addEventListener('click', function (ev) {
       var b = ev.target.closest('[data-cmd]'); if (!b || b.closest('dialog') || b.closest('#props') || b.closest('.tabpane')) return;
       var c = b.dataset.cmd;
@@ -2442,7 +2433,7 @@
     Printer.titleFn = defaultName; Printer.titleRestore = updateTitle;   // 另存 PDF 的預設檔名＝專案名稱
     window.addEventListener('beforeunload', function (ev) { if (App.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
     setTool('select');
-    switchTab('case');
+    switchTab('layer');
     renderLayerList(); renderProps(); renderPlanSel(); updateOvBadge(); updateLockBar();
     fitView();
     // 還原自動暫存

@@ -57,24 +57,17 @@
   </header>
 
   <aside id="left">
-    <!-- 作業步驟：點一下就到該步驟需要的地方 -->
-    <ol class="steps">
-      <li data-step="import"><b>1</b>匯入</li>
-      <li data-step="crop"><b>2</b>裁切</li>
-      <li data-step="feat"><b>3</b>說明</li>
-      <li data-step="case"><b>4</b>資料</li>
-      <li data-step="out"><b>5</b>輸出</li>
-    </ol>
+    <!-- 作業步驟就是頁籤：照 1→4 的順序做，做完的會打勾 -->
     <nav class="tabs">
-      <button data-tab="case">案件資料</button>
-      <button data-tab="feat">說明</button>
-      <button data-tab="layer">圖層</button>
-      <button data-tab="out">輸出</button>
+      <button data-tab="layer" title="匯入 DXF、指定各圖層用途"><b>1</b>圖層</button>
+      <button data-tab="feat" title="點選成面、填說明表內容"><b>2</b>說明</button>
+      <button data-tab="case" title="土地坐落、囑託文號、日期"><b>3</b>案件資料</button>
+      <button data-tab="out" title="列印 A3、8K 套印、範本"><b>4</b>輸出</button>
     </nav>
     <div class="tabbody">
-      <section class="tabpane" id="tab-case"></section>
+      <section class="tabpane" id="tab-layer"></section>
       <section class="tabpane" id="tab-feat" hidden></section>
-      <section class="tabpane" id="tab-layer" hidden></section>
+      <section class="tabpane" id="tab-case" hidden></section>
       <section class="tabpane" id="tab-out" hidden></section>
     </div>
   </aside>
@@ -124,7 +117,7 @@
     </details>
   </aside>
 
-  <footer id="status"><span id="toolTip"></span><span id="coord"></span><span id="saveState"></span></footer>
+  <footer id="status"><span id="toolTip"></span><span id="lastMsg" title="最近一則訊息"></span><span id="coord"></span><span id="saveState"></span></footer>
 </div>
 
 <div id="ctx" class="ctx" hidden></div>
@@ -141,15 +134,17 @@
 <dialog id="dlgHelp">
   <h3>作業流程</h3>
   <ol>
-    <li><b>匯入</b>：「匯入 DXF」選內網套疊輸出的 DXF（整段地籍圖、現況圖、分割圖，可多選）；舊系統的 .m02 用「檔案 → 開啟」。到「圖層」頁確認各圖層用途。</li>
-    <li><b>裁切</b>：略圖框自動置中於本案地號。左側工具「移圖」拖曳框內調整位置；選取略圖框後在右側設定比例尺、裁切大小（cm）、文字大小。</li>
+    <li><b>圖層（匯入）</b>：「匯入 DXF」選內網套疊輸出的 DXF（整段地籍圖、現況圖、分割圖，可多選）；舊系統的 .m02 用「檔案 → 開啟」。在「圖層」頁確認各圖層用途。略圖框會自動置中於本案地號，在框內拖曳可調整裁切位置；點略圖框後在右側設定比例尺、裁切大小（cm）。</li>
     <li><b>說明</b>：工具「成面」在每個區塊內點一下，自動找出範圍、計算面積、編號；在「說明」頁填使用地號、備註或所有權人，說明表自動產生。現況與分割用頂端「編輯」切換。</li>
-    <li><b>資料</b>：在「案件資料」頁填寫土地坐落、囑託法院及文號、囑託事項、收件、鑑測日期，版面自動帶入。</li>
+    <li><b>案件資料</b>：在「案件資料」頁填寫土地坐落、囑託法院及文號、囑託事項、收件、鑑測日期，版面自動帶入。</li>
     <li><b>輸出</b>：「列印 A3」1:1 列印；「8K 套印」先在「輸出」頁框選範圍。核定後填入核定日期再印。</li>
   </ol>
   <p><b>操作小技巧</b></p>
   <ul class="small">
     <li>元件單擊選取、拖曳移動；拖拉控制點縮放，會自動對齊其他元件邊緣（Alt 取消對齊）。</li>
+    <li>略圖框：框內拖曳＝移圖（換裁切位置），拖框線＝移動整個框；裁好後可在右鍵「鎖定裁切」。</li>
+    <li>畫布右上角「鎖定」：鎖住不想動到的圖層（地籍線預設鎖定），改線時不會誤選。</li>
+    <li>左側、右側面板裡有 ▸ 的標題可以點開，裡面是比較少用的設定；開合狀態會記住。</li>
     <li>表格：<b>雙擊</b>進入表格編輯，才可拖拉格線、點格子、Shift 多選合併；Esc 結束。</li>
     <li>線段：選取後可改線型（實線、虛線、鏈線…）、顏色；「斷線」把一條線切成兩段分別設定；按 1／2 快速設為現況／分割。</li>
     <li><b>右鍵</b>：線段可直接改成現況／分割、改線型、粗細、顏色、斷線；說明項目、地號文字、略圖框、表格也有常用功能。</li>
