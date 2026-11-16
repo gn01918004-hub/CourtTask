@@ -80,8 +80,9 @@ const ROOT = path.join(__dirname, '..');
     const has = (svg, el) => svg.indexOf('data-id="' + el.id + '"') >= 0;
     const s1 = Printer.regionSVG(App.P, App.cad); App.P.output.k8.keepFrame = true; const s2 = Printer.regionSVG(App.P, App.cad); App.P.output.k8.keepFrame = false;
     App.folds.paper = true; document.querySelector('[data-tab=out]').click();
-    const kp = document.querySelector('#k8Paper'); kp.value = 'a3'; kp.onchange(); const a3 = [App.P.output.k8.w, App.P.output.k8.h, Printer.k8Page(App.P).fits, document.querySelector('[data-act=print8k]').textContent];
-    const kp2 = document.querySelector('#k8Paper'); kp2.value = '8k'; kp2.onchange();
+    document.querySelector('[data-paper=a3]').click(); App.P.output.k8.offX = 31; const a3 = [App.P.output.k8.w, App.P.output.k8.h, Printer.k8Page(App.P).fits, document.querySelector('[data-act=print8k]').textContent + '|' + document.querySelector('#btnOver').textContent];
+    document.querySelector('[data-paper="8k"]').click(); const off8 = App.P.output.k8.offX; document.querySelector('[data-paper=a3]').click(); const offA = App.P.output.k8.offX; document.querySelector('[data-paper="8k"]').click();
+    if (off8 !== 20 || offA !== 31) a3[2] = false;
     return { off: [has(s1, frame), has(s1, left), has(s1, map), has(s1, ft), has(s1, nor)], on: [has(s2, frame), has(s2, left)], a3, back: [App.P.output.k8.w, App.P.output.k8.h] };
   });
   ok(r.off.join() === 'false,false,true,true,true' && r.on.join() === 'true,true' && r.a3[0] === 420 && r.a3[1] === 297 && r.a3[2] && /A3/.test(r.a3[3]) && r.back.join() === '388,267', '套印不印外框與說明欄框線；紙張可切換 A3', r);
@@ -100,6 +101,20 @@ const ROOT = path.join(__dirname, '..');
     const one = await pg.evaluate(() => document.querySelector('#status').getBoundingClientRect().height <= 31 && /TWD97/.test(document.querySelector('#coord').textContent));
     ok(b0 === b1 && one, '滑鼠進出略圖時狀態列不換行、不推動畫面', { b0, b1 });
   }
+  // 圖名自動加註：只有現況線＝(現況圖)；有分割線的方案依序＝(甲案)、(乙案)；舊專案不加
+  r = await pg.evaluate(async () => {
+    const wait = () => new Promise(res => setTimeout(res, 500));
+    const title = () => Render.fieldsOf(App.P).title;
+    App.P.features = App.P.features.filter(f => (f.ov || 'case') !== 'split'); App.P.userLines = []; App.P.settings.titleAuto = true;
+    App.api.checkpoint(); const t1 = title();
+    const m = App.P.elements.find(e => e.type === 'map');
+    App.P.userLines.push({ role: 'split', x1: m.cx, y1: m.cy, x2: m.cx + 5, y2: m.cy + 5 }); App.api.checkpoint(); const t2 = title();
+    App.P.settings.titleAuto = false; const t3 = title(); App.P.settings.titleAuto = true;
+    const d = JSON.parse(JSON.stringify(App.api.fileData())); delete d.project.settings.titleAuto; delete d.project.planTags; App.api.loadData(d); const t4 = title();
+    App.P.settings.titleAuto = true; App.P.userLines = []; App.P.fields.zz = '1'; App.api.checkpoint(); await wait();
+    return [t1, t2, t3, t4, document.querySelector('#planSel').textContent];
+  });
+  ok(r[0] === '土地複丈成果圖 (現況圖)' && r[1] === '土地複丈成果圖 (甲案)' && r[2] === '土地複丈成果圖' && r[3] === '土地複丈成果圖' && /現況圖/.test(r[4]), '圖名自動加註（現況圖／甲案），舊專案維持原樣', r);
   // 未儲存記號
   await pg.waitForTimeout(700);
   r = await pg.evaluate(() => [App.dirty, document.title.indexOf('●') === 0, document.querySelector('#fileName').textContent]);

@@ -13,7 +13,13 @@ cd "$(dirname "$0")/.."
 OUT="${OUT:-tests/out}"
 mkdir -p "$OUT"
 fail=0
-run() { echo "== $*"; if ! timeout 600 node "$@" 2>&1 | grep -E "^PASS|^FAIL|errors|OK$"; then fail=1; fi; }
+run() {
+  echo "== $*"
+  local out; out="$(timeout 600 node "$@" 2>&1)"; local rc=$?
+  echo "$out" | grep -E "^PASS|^FAIL|errors|OK$"
+  # 任何一項 FAIL、程式結束碼不是 0、或完全沒有輸出，都算失敗
+  if [ $rc -ne 0 ] || echo "$out" | grep -q "^FAIL" || ! echo "$out" | grep -qE "^PASS|OK$|errors: none"; then fail=1; echo "!! 失敗：$*"; fi
+}
 node tests/geom.test.js | tail -1
 run tests/e2e.js "$OUT"
 run tests/ui.js

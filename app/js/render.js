@@ -13,6 +13,9 @@
     var maps = P.elements.filter(function (e) { return e.type === 'map'; });
     f.scale = maps[0] ? maps[0].scale : '';
     f.plan = P.plans && P.plans[P.planIdx] ? P.plans[P.planIdx].name : '';
+    // 圖名自動加註：只有現況線＝(現況圖)；有分割線＝(甲案)、(乙案)…（由主程式依各方案的線判斷後存在 P.planTags）
+    f.planTag = (P.planTags && P.planTags[P.planIdx]) || '';
+    if (P.settings && P.settings.titleAuto && f.planTag && !/\{plan(Tag)?\}/.test(P.fields.title || '') && String(f.title || '').indexOf(f.planTag) < 0) f.title = (f.title || '') + ' (' + f.planTag + ')';
     maps.forEach(function (m, i) { f['scale' + (i + 1)] = m.scale; });
     // 去掉行政區字尾，讓「縣／市」「鄉鎮／市區」「段」固定在自己的格子
     f.countyName = String(f.county || '').trim().replace(/[縣市]$/, '');
