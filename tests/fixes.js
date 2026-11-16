@@ -74,6 +74,17 @@ const ROOT = path.join(__dirname, '..');
   r = await pg.evaluate(() => { const d = JSON.parse(JSON.stringify(App.api.fileData())); d.project.output.k8.w = 267; d.project.output.k8.h = 388; App.api.loadData(d); const o = App.P.output.k8; App.P.fields.note1 = '1'; return [o.w, o.h]; });
   await pg.waitForTimeout(500);
   ok(r[0] === 388 && r[1] === 267, '舊專案的 8K 直式設定開啟時改成橫式', r);
+  // 套印不印外框與左側說明欄的框線；可切換成 A3 紙
+  r = await pg.evaluate(() => {
+    const frame = App.P.elements.find(e => e.type === 'rect'), left = App.P.elements.find(e => e.type === 'table'), map = App.P.elements.find(e => e.type === 'map'), ft = App.P.elements.find(e => e.type === 'ftable'), nor = App.P.elements.find(e => e.type === 'north');
+    const has = (svg, el) => svg.indexOf('data-id="' + el.id + '"') >= 0;
+    const s1 = Printer.regionSVG(App.P, App.cad); App.P.output.k8.keepFrame = true; const s2 = Printer.regionSVG(App.P, App.cad); App.P.output.k8.keepFrame = false;
+    App.folds.paper = true; document.querySelector('[data-tab=out]').click();
+    const kp = document.querySelector('#k8Paper'); kp.value = 'a3'; kp.onchange(); const a3 = [App.P.output.k8.w, App.P.output.k8.h, Printer.k8Page(App.P).fits, document.querySelector('[data-act=print8k]').textContent];
+    const kp2 = document.querySelector('#k8Paper'); kp2.value = '8k'; kp2.onchange();
+    return { off: [has(s1, frame), has(s1, left), has(s1, map), has(s1, ft), has(s1, nor)], on: [has(s2, frame), has(s2, left)], a3, back: [App.P.output.k8.w, App.P.output.k8.h] };
+  });
+  ok(r.off.join() === 'false,false,true,true,true' && r.on.join() === 'true,true' && r.a3[0] === 420 && r.a3[1] === 297 && r.a3[2] && /A3/.test(r.a3[3]) && r.back.join() === '388,267', '套印不印外框與說明欄框線；紙張可切換 A3', r);
   dialogs = [];
   r = await pg.evaluate(() => { let n = 0; window.print = () => { n++; }; const o = App.P.output.k8, keep = JSON.stringify(o.region); o.region = { x: 0, y: 0, w: 420, h: 297 }; document.querySelector('#toolbar [data-cmd=print8k]').click(); o.region = JSON.parse(keep); return new Promise(res => setTimeout(() => res(n), 200)); });
   ok(dialogs.some(d => /超出/.test(d)), '8K 範圍比紙張大時先提醒', dialogs.map(d => d.slice(0, 30)));

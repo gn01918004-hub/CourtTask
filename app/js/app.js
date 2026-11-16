@@ -2107,23 +2107,28 @@
     var box = $('#tab-out'), P = App.P, o = P.output.k8, h = '';
     h += '<div class="sec">A3 成果圖（1:1）</div>';
     h += '<div class="btnrow">' + btn('printA3', '列印 A3 成果圖', 'primary big') + '</div>';
-    h += '<div class="sec">8K 圖紙套印（框選部分 1:1）</div>';
+    var pk = (+o.w === 388 && +o.h === 267) ? '8k' : (+o.w === 420 && +o.h === 297) ? 'a3' : '';
+    h += '<div class="sec">圖紙套印（8K 或 A3，框選部分 1:1）</div>';
     h += '<div id="k8Status">' + (o.region ? k8Status() : '<p class="small">尚未框選範圍；直接按列印會自動框選「說明表＋略圖」。</p>') + '</div>';
-    h += '<div class="btnrow">' + btn('print8k', '列印 8K 套印', 'primary big') + '</div>';
+    h += '<div class="btnrow">' + btn('print8k', pk === 'a3' ? '列印 A3 套印' : pk === '8k' ? '列印 8K 套印' : '列印套印', 'primary big') + '</div>';
     h += '<div class="btnrow"><span class="small">套印範圍</span>' + btn('regionAuto', '自動框選') + btn('region', '滑鼠框選 (R)') + '</div>';
     var ph = '<p class="small"><b>A3</b></p><div class="grid2">' + field('紙寬 (mm)', inp('sheet.w', P.sheet.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('sheet.h', P.sheet.h, 'number', 'min="10"')) +
       field('印表位移 X (mm)', inp('sheet.dx', P.sheet.dx, 'number', 'step="0.1"')) + field('印表位移 Y (mm)', inp('sheet.dy', P.sheet.dy, 'number', 'step="0.1"')) + '</div>';
-    ph += '<p class="small"><b>8K</b>（紙夾標示 267×388，橫放：寬 388、高 267）</p><div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number', 'min="10"')) +
+    ph += '<p class="small"><b>套印</b>（印到已經印好格線的圖紙上）</p>' + field('套印用的紙張', '<select id="k8Paper"><option value="8k"' + (pk === '8k' ? ' selected' : '') + '>8K（紙夾標示 267×388，橫放：寬 388 × 高 267）</option><option value="a3"' + (pk === 'a3' ? ' selected' : '') + '>A3 橫式（寬 420 × 高 297）</option><option value=""' + (pk ? '' : ' selected') + '>自訂（在下面填紙寬、紙高）</option></select>') +
+      '<div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number', 'min="10"')) +
       field('左下平移 X (mm)', inp('output.k8.offX', o.offX, 'number', 'step="0.1"')) + field('左下平移 Y (mm)', inp('output.k8.offY', o.offY, 'number', 'step="0.1"')) +
       field('印表位移 X', inp('output.k8.dx', o.dx, 'number', 'step="0.1"')) + field('印表位移 Y', inp('output.k8.dy', o.dy, 'number', 'step="0.1"')) + '</div>';
     if (o.region) ph += '<p class="small"><b>8K 套印範圍</b>（mm，可直接改數字）</p><div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
       field('範圍寬', inp('output.k8.region.w', o.region.w, 'number', 'step="0.1" min="1"')) + field('範圍高', inp('output.k8.region.h', o.region.h, 'number', 'step="0.1" min="1"')) + '</div>';
-    ph += '<p class="small">印表機若有固定偏移，用「印表位移」校正。</p>';
+    ph += '<label class="inline">' + chk('output.k8.keepFrame', o.keepFrame) + ' 套印時也印外框和左側說明欄的框線（圖紙上已經印好格線時不要勾）</label>';
+    ph += '<p class="small">「左下平移」是範圍的左下角離紙張左下角多遠，換一種圖紙要重新量。印表機若有固定偏移，用「印表位移」校正。</p>';
     h += fold('paper', '紙張、平移與位移設定', ph);
     h += '<div class="note"><b>列印視窗請這樣設定</b><br>紙張＝A3（8K 選紙夾的 8K 自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設 100%</b>，勾選「背景圖形」。<br>送審核定後：到「案件資料」填核定日期，再印一次 A3' + (P.fields.copies ? '（本案 <b>' + R.esc(P.fields.copies) + '</b> 份）' : '') + '。</div>';
     h += fold('tpl', '版面範本', '<p class="small">把目前的版面存成範本，開新案件時選用；匯出成檔案可以帶到別台電腦。</p><div class="btnrow">' + btn('saveTpl', '目前版面存成範本') + btn('exportTpl', '匯出範本檔') + btn('importTpl', '匯入範本檔') + '</div>');
     box.innerHTML = h;
     bind(box, P, function () { render(); var ks = $('#k8Status', box); if (ks && o.region) ks.innerHTML = k8Status(); });
+    var kp = $('#k8Paper', box);
+    if (kp) kp.onchange = function () { var sz = { '8k': [388, 267], a3: [420, 297] }[kp.value]; if (sz) { o.w = sz[0]; o.h = sz[1]; changed(); renderOutTab(); toast('套印紙張改為寬 ' + sz[0] + ' × 高 ' + sz[1] + ' mm；左下平移請依這種圖紙重新確認'); } };
     box.onclick = function (ev) {
       var a = ev.target.closest('[data-act]'); if (!a) return;
       var act = a.dataset.act;
