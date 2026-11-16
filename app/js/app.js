@@ -764,7 +764,7 @@
     // 狀態列座標
     var m = mapAt(p), st = '紙上 ' + round(p[0], 1) + ', ' + round(p[1], 1) + ' mm';
     if (m) { var w = R.mapView(m).toW(p[0], p[1]); st += '　｜　TWD97 E ' + w[0].toFixed(3) + '　N ' + w[1].toFixed(3) + '　(1/' + m.scale + ')'; }
-    $('#coord').textContent = st;
+    $('#coord').textContent = st; $('#coord').title = st;
     var hm = m ? m.id : null;
     if (App.tool === 'pan' && hm !== App.hoverMap) { App.hoverMap = hm; render(); }
 
@@ -2309,7 +2309,7 @@
       assign: '改歸屬：先在畫面上方選「改成」哪一層，再點線段（Shift＝整串、拖曳＝框選）',
       lsel: '框選線段：在略圖內拖曳矩形，選取完全在框內的現況/分割線（不含地籍線），再到右側改歸屬或線型'
     };
-    $('#toolTip').textContent = tips[t] || '';
+    $('#toolTip').textContent = tips[t] || ''; $('#toolTip').title = tips[t] || '';
     renderAssignBar();
     render();
   }

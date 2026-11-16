@@ -91,6 +91,15 @@ const ROOT = path.join(__dirname, '..');
   // 清冊 CSV：25-4 不會被 Excel 當成日期
   r = await pg.evaluate(() => { const f = App.P.features[0]; f.inRegister = true; f.landNo = '25-4'; const s = Printer.registerCSV(App.P, App.P.elements.find(e => e.type === 'ftable')); f.inRegister = false; return s; });
   ok(r.indexOf('"=""25-4"""') > 0, '清冊 CSV 的地號以文字輸出');
+  // 狀態列：滑鼠進出略圖時高度與各格位置不變（不會抖動）
+  {
+    const box = () => pg.evaluate(() => ['#status', '#coord', '#saveState', '#stage'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(); }).join('|'));
+    await pg.evaluate(() => { document.querySelector('#saveState').textContent = '自動暫存失敗（請手動儲存）'; });
+    await pg.mouse.move(700, 20); const b0 = await box();
+    const pm = await mapPt(10, 10); await pg.mouse.move(pm.x, pm.y); await pg.waitForTimeout(100); const b1 = await box();
+    const one = await pg.evaluate(() => document.querySelector('#status').getBoundingClientRect().height <= 31 && /TWD97/.test(document.querySelector('#coord').textContent));
+    ok(b0 === b1 && one, '滑鼠進出略圖時狀態列不換行、不推動畫面', { b0, b1 });
+  }
   // 未儲存記號
   await pg.waitForTimeout(700);
   r = await pg.evaluate(() => [App.dirty, document.title.indexOf('●') === 0, document.querySelector('#fileName').textContent]);
