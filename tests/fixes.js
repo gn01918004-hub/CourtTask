@@ -115,6 +115,21 @@ const ROOT = path.join(__dirname, '..');
     return [t1, t2, t3, t4, document.querySelector('#planSel').textContent];
   });
   ok(r[0] === '土地複丈成果圖 (現況圖)' && r[1] === '土地複丈成果圖 (甲案)' && r[2] === '土地複丈成果圖' && r[3] === '土地複丈成果圖' && /現況圖/.test(r[4]), '圖名自動加註（現況圖／甲案），舊專案維持原樣', r);
+  // 套印依據：只在套印時印「依據〈囑託法院及文號〉辦理。」，自動放在說明表下方、落在自動框選範圍內
+  r = await pg.evaluate(() => {
+    App.P.fields.courtDoc = '臺灣苗栗地方法院115年10月05日苗院科民信115苗簡674字\n第1159008815號函。';
+    App.api.render(); document.querySelector('[data-tab=out]').click(); document.querySelector('[data-act=regionAuto]').click();
+    const el = App.P.elements.find(e => e.overOnly), rg = App.P.output.k8.region, P = App.P;
+    const fb = P.elements.filter(e => e.type === 'ftable').map(e => Render.bounds(e, P)), low = Math.max(...fb.map(b => b.y + b.h)), mp = P.elements.find(e => e.type === 'map');
+    const want = '依據臺灣苗栗地方法院115年10月05日苗院科民信115苗簡674字第1159008815號函辦理。';
+    const txt = s => (s.match(/<text[^>]*>([^<]*)<\/text>/g) || []).map(x => x.replace(/<[^>]+>/g, '')).join('');
+    const over = txt(Printer.regionSVG(P, App.cad)), a3 = txt(Printer.sheetSVG(P, App.cad));
+    const inside = el.x >= rg.x && el.y >= rg.y && el.x + el.w <= rg.x + rg.w + 0.01 && el.y + el.h <= rg.y + rg.h + 0.01;
+    const clear = el.y >= low + 3 && el.x + el.w <= mp.x;
+    P.fields.courtDoc = ''; const empty = txt(Printer.regionSVG(P, App.cad)).indexOf('依據') < 0;
+    P.fields.courtDoc = 'x'; return { over: over.indexOf(want) >= 0, a3: a3.indexOf('辦理') < 0, inside, clear, empty, box: [el.x, el.y, el.w, el.h] };
+  });
+  ok(r.over && r.a3 && r.inside && r.clear && r.empty, '套印加印「依據…辦理。」（A3 不印、放在說明表下方空白處、沒填文號不印）', r);
   // 未儲存記號
   await pg.waitForTimeout(700);
   r = await pg.evaluate(() => [App.dirty, document.title.indexOf('●') === 0, document.querySelector('#fileName').textContent]);

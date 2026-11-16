@@ -187,6 +187,10 @@
     if (P.ovs.split && !P.ovs.split.schemeSet) { P.ovs.split.codeScheme = 'stem'; P.ovs.split.schemeSet = true; }
     if (P.settings.codeScheme && !P.ovs.case._mig) { P.ovs.case.codeScheme = P.ovs.case.codeScheme || P.settings.codeScheme; }
     ['parcelLine', 'caseLine', 'splitLine', 'otherLine'].forEach(function (k) { P.styles[k] = Object.assign({}, base.styles[k], P.styles[k] || {}); });
+    // 舊專案、舊範本補上套印依據（每個方案的版面都補；使用者自己刪掉的不再補）
+    if (!P.noOverNote) [P.elements].concat((P.plans || []).map(function (pl) { return pl.data && pl.data.elements; })).forEach(function (els) {
+      if (els && !els.some(function (e) { return e.overOnly; })) els.push(M.overNote());
+    });
     P.elements.forEach(function (e) {
       if (e.type === 'ftable' && !e.columns) {
         var keys = ['code', 'area', 'landNo', 'note'];
@@ -244,6 +248,7 @@
       App.planCads = [App.cad]; fileHandle = null;
       App.P.fields.caseName = file.name.replace(/\.m02$/i, '');
       App.P.plans[0].name = '舊檔';
+      App.P.elements = App.P.elements.filter(function (e) { return !e.overOnly; });   // 舊檔是已完成的成果，不自動加套印依據
       resetHistory(); App.sel = null; App.selCell = null;
       setDirty(false); refreshAll(); fitView(); autosave();
       var unk = Object.keys(r.report.unknown).length ? '；略過不支援的物件（影像等）' + Object.keys(r.report.unknown).map(function (k) { return r.report.unknown[k]; }).reduce(function (a, b) { return a + b; }, 0) + ' 個' : '';
@@ -368,6 +373,21 @@
     requestAnimationFrame(function () { rafPending = false; renderNow(); });
   }
   /* 第二張說明表自動跟在第一張下方 */
+  /* 套印依據（「依據○○辦理。」）自動放在說明表下方的空白處，寬度同說明表、高度依字數；拖動過就不再自動排 */
+  function overNoteEl() { return App.P.elements.filter(function (e) { return e.overOnly; })[0]; }
+  function layoutOverNote() {
+    var P = App.P, el = overNoteEl(); if (!el || !el.autoPos || el.hidden) return;
+    var fts = P.elements.filter(function (e) { return e.type === 'ftable' && !e.hidden; }), mp = maps()[0], x, y, w;
+    if (fts.length) {
+      var bs = fts.map(function (e) { return R.bounds(e, P); });
+      x = Math.min.apply(null, bs.map(function (b) { return b.x; }));
+      w = Math.max.apply(null, bs.map(function (b) { return b.x + b.w; })) - x;
+      y = Math.max.apply(null, bs.map(function (b) { return b.y + b.h; })) + 4;
+    } else if (mp) { x = mp.x; w = Math.min(mp.w, 120); y = mp.y + mp.h + 4; } else return;
+    w = Math.max(w, 60);
+    var lines = M.wrap(M.fill(el.text, R.fieldsOf(P)), w - 1.6, el.fs || 4.15, el.font || 'kai').length;
+    el.x = round(x, 2); el.y = round(y, 2); el.w = round(w, 2); el.h = round(Math.max(7, lines * (el.fs || 4.15) * (el.lh || 1.3) + 1.6), 2);
+  }
   function layoutStacked() {
     App.P.elements.forEach(function (e) {
       if (!e.stackBelow) return;
@@ -382,7 +402,7 @@
   }
   function renderNow() {
     applyView();
-    layoutStacked();
+    layoutStacked(); layoutOverNote();
     var P = App.P, s = '';
     s += '<defs><filter id="shadow" x="-5%" y="-5%" width="110%" height="110%"><feDropShadow dx="0.6" dy="0.8" stdDeviation="1.2" flood-opacity="0.25"/></filter></defs>';
     s += '<rect x="0" y="0" width="' + P.sheet.w + '" height="' + P.sheet.h + '" fill="#fff" filter="url(#shadow)"/>';
@@ -833,10 +853,10 @@
       }
       case 'move':
         if (!drag.moved && Math.hypot(dx, dy) < 2 / App.view.z) return;
-        drag.moved = true; el = drag.el; o = drag.orig; delete el.stackBelow; delete el.matchWidth;
+        drag.moved = true; el = drag.el; o = drag.orig; delete el.stackBelow; delete el.matchWidth; delete el.autoPos;
         var sd = ev.altKey ? [dx, dy] : snapMove(el, drag.b, dx, dy);
         el.x = round(o.x + sd[0], 2); el.y = round(o.y + sd[1], 2); break;
-      case 'resize': resizeEl(drag, dx, dy, ev); break;
+      case 'resize': delete drag.el.autoPos; resizeEl(drag, dx, dy, ev); break;
       case 'divider': dragDivider(drag, dx, dy); break;
       case 'vertex': {
         var sv = snapWorld(drag.m, p); App.snapPt = sv.p;
@@ -1373,7 +1393,7 @@
   }
   function deleteSel() {
     var s = App.sel, P = App.P; if (!s) return;
-    if (s.kind === 'el') { var el = elById(s.id); if (el && el.locked) return toast('元件已鎖定'); P.elements = P.elements.filter(function (e) { return e.id !== s.id; }); }
+    if (s.kind === 'el') { var el = elById(s.id); if (el && el.locked) return toast('元件已鎖定'); if (el && el.overOnly) P.noOverNote = true; P.elements = P.elements.filter(function (e) { return e.id !== s.id; }); }
     else if (s.kind === 'feature' || s.kind === 'flabel') P.features = P.features.filter(function (f) { return f.id !== s.id; });
     else if (s.kind === 'anno') P.annos = P.annos.filter(function (a) { return a.id !== s.id; });
     else if (s.kind === 'uline') P.userLines.splice(s.idx, 1);
@@ -1532,6 +1552,7 @@
           field('線型', dashSel('dash', el.dash)) + (el.type === 'line' ? field('箭頭', arrowSel('arrow', el.arrow)) : '') + '</div>';
       }
       if (el.type === 'north') h += field('文字', inp('label', el.label || '北'));
+      if (el.overOnly) h += '<div class="note">這段字<b>只在套印時印出</b>（A3 成果圖左欄已有文號，不會印）。<br>{courtDocBare} 會帶入「囑託法院及文號」。' + (el.autoPos ? '目前自動排在說明表下方；拖動它就會固定在你放的位置。' : '') + '</div>' + (el.autoPos ? '' : '<div class="btnrow">' + btn('overAuto', '放回說明表下方（自動排）') + '</div>');
       if (el.type === 'map') h += mapProps(el);
       if (isTbl) h += '<div class="btnrow">' + (App.tableEdit === el.id ? btn('tedit', '結束表格編輯 (Esc)', 'primary') : btn('tedit', '編輯表格（或雙擊表格）')) + '</div>';
       if (el.type === 'table') h += tableProps(el);
@@ -1550,6 +1571,7 @@
         if (act === 'front') reorder(el.id, 'top'); else if (act === 'back') reorder(el.id, 'bottom');
         else if (act === 'dup') duplicateEl(el.id); else if (act === 'del') deleteSel();
         else if (act === 'tedit') setTableEdit(App.tableEdit === el.id ? null : el.id);
+        else if (act === 'overAuto') { el.autoPos = true; render(); changed(); renderProps(); }
         else elAction(el, act, a);
       };
       return;
@@ -2257,6 +2279,10 @@
     if (!pg.fits && !confirm('8K 套印範圍比紙張大，超出的部分會印不出來：\n' +
       (pg.overW > 0 ? '・寬度超出 ' + round(pg.overW, 1) + ' mm\n' : '') + (pg.overH > 0 ? '・高度超出 ' + round(pg.overH, 1) + ' mm\n' : '') +
       '（紙張 ' + pg.w + '×' + pg.h + ' mm，已含左下平移）\n\n按「確定」＝照樣列印\n按「取消」＝回「輸出」頁調整範圍或紙張大小')) { switchTab('out'); return; }
+    layoutOverNote();
+    var on = overNoteEl(), rg = P.output.k8.region;
+    if (on && !on.hidden && R.fieldsOf(P).courtDocBare && (on.x < rg.x - 0.5 || on.y < rg.y - 0.5 || on.x + on.w > rg.x + rg.w + 0.5 || on.y + on.h > rg.y + rg.h + 0.5) &&
+      !confirm('「依據…辦理。」那段字有一部分在套印範圍外面，會印不完整。\n\n按「確定」＝照樣列印\n按「取消」＝回去按「自動框選」，或把那段字拖進範圍內')) { switchTab('out'); return; }
     if (pg.swapped) toast('套印範圍比直式紙張寬，已自動改用橫式 ' + pg.w + '×' + pg.h + ' mm 列印（紙張請橫放）', 6000);
     Printer.print8K(P, App.cad);
   }
@@ -2269,7 +2295,9 @@
   /* 8K 套印範圍：左側說明欄右緣 → 外框右緣；外框頂端 → 略圖、說明表、指北針的最底部（不含主任、日期） */
   function autoRegion() {
     var P = App.P, B = function (e) { return R.bounds(e, P); };
-    var parts = P.elements.filter(function (e) { return !e.hidden && (e.type === 'map' || e.type === 'ftable' || e.type === 'north'); });
+    layoutOverNote();
+    var hasDoc = !!R.fieldsOf(P).courtDocBare;
+    var parts = P.elements.filter(function (e) { return !e.hidden && (e.type === 'map' || e.type === 'ftable' || e.type === 'north' || (e.overOnly && hasDoc)); });
     if (!parts.length) return false;
     var frame = P.elements.filter(function (e) { return e.type === 'rect' && !e.hidden; }).sort(function (a, b) { return b.w * b.h - a.w * a.h; })[0];
     var left = P.elements.filter(function (e) { return e.type === 'table' && !e.hidden; })[0];

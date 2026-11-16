@@ -92,8 +92,15 @@
       { id: uid(), type: 'map', name: '略圖框', x: 168.4, y: 48.5, w: 200, h: 200, scale: 500, cx: null, cy: null, border: true, lw: 0.18 },
       { id: uid(), type: 'text', name: '主任', x: 262, y: 254.5, w: 40, h: 8, text: '主任', fs: 5.16, align: 'left', valign: 'middle', font: 'kai' },
       { id: uid(), type: 'text', name: '核定日期', x: 262, y: 265.5, w: 90, h: 8, text: '中華民國　{apY}　年　{apM}　月　{apD}　日', fs: 5.16, align: 'left', valign: 'middle', font: 'kai' },
+      overNote(),
       { id: uid(), type: 'text', name: '比例尺', x: 150, y: 279, w: 80, h: 8, text: '比例尺： 1/{scale}', fs: 5.04, align: 'center', valign: 'middle', font: 'kai' }
     ];
+  }
+
+  /* 套印依據：只在套印時印出「依據〈囑託法院及文號〉辦理。」（A3 成果圖左欄已經有文號，所以不印）。
+     autoPos＝自動放在說明表下方的空白處；使用者拖動後就固定在拖到的位置。 */
+  function overNote() {
+    return { id: uid(), type: 'text', name: '套印依據', overOnly: true, autoPos: true, x: 85.5, y: 130, w: 78, h: 12, text: '依據{courtDocBare}辦理。', fs: 4.15, lh: 1.3, align: 'left', valign: 'top', font: 'kai' };
   }
 
   function defaultStyles() {
@@ -197,7 +204,7 @@
   var PLAN_KEYS = ['elements', 'features', 'annos', 'userLines', 'segStyle', 'splits', 'textOver', 'layerRoles', 'output', 'ovs', 'activeOv', 'merge'];
 
   global.Model = {
-    FIELDS: FIELDS, KAI: KAI, SANS: SANS, uid: uid, newProject: newProject, defaultElements: defaultElements,
+    overNote: overNote, FIELDS: FIELDS, KAI: KAI, SANS: SANS, uid: uid, newProject: newProject, defaultElements: defaultElements,
     defaultStyles: defaultStyles, measure: measure, codeAt: codeAt, PLAN_KEYS: PLAN_KEYS, wrap: wrap, fill: fill, fontFamily: fontFamily, nextCode: nextCode
   };
 })(typeof window !== 'undefined' ? window : globalThis);

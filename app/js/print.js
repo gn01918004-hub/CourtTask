@@ -62,7 +62,7 @@
     var left = (+o.offX || 0) + (+o.dx || 0);
     var top = pg.h - (+o.offY || 0) - r.h + (+o.dy || 0);
     return '<svg xmlns="http://www.w3.org/2000/svg" width="' + n(r.w) + 'mm" height="' + n(r.h) + 'mm" viewBox="' + n(r.x) + ' ' + n(r.y) + ' ' + n(r.w) + ' ' + n(r.h) +
-      '" style="position:absolute;left:' + n(left) + 'mm;top:' + n(top) + 'mm;overflow:hidden">' + R.renderSheet(PP, cad, { print: true }) + '</svg>';
+      '" style="position:absolute;left:' + n(left) + 'mm;top:' + n(top) + 'mm;overflow:hidden">' + R.renderSheet(PP, cad, { print: true, over: true }) + '</svg>';
   }
   function print8K(P, cad) {
     var s = regionSVG(P, cad);

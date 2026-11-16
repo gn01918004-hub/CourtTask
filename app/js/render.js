@@ -22,6 +22,8 @@
     f.townName = String(f.town || '').trim().replace(/(鄉|鎮|市|區)$/, '');
     f.sectionName = String(f.section || '').trim().replace(/段$/, '');
     f.subsectionName = String(f.subsection || '').trim().replace(/小段$/, '');
+    // 囑託法院及文號去掉換行和句尾標點，給「依據○○辦理。」用
+    f.courtDocBare = String(f.courtDoc || '').replace(/\s*\n\s*/g, '').trim().replace(/[。．.；;，,、\s]+$/, '');
     return f;
   }
 
@@ -751,6 +753,16 @@
     if (el.hidden) return '';
     switch (el.type) {
       case 'text': {
+        if (el.overOnly) {   // 只在套印時印出
+          if (opts.print && !opts.over) return '';
+          var FO = fieldsOf(P), hasDoc = !!FO.courtDocBare;
+          if (opts.print) return hasDoc ? '<g data-id="' + el.id + '">' + textBlock(el.x, el.y, el.w, el.h, M.fill(el.text, FO), el) + '</g>' : '';
+          // 編輯畫面：灰字＋虛線框，提醒這段字 A3 不印
+          var show = hasDoc ? M.fill(el.text, FO) : '（套印時這裡會印「依據○○辦理。」，請先在案件資料填「囑託法院及文號」）';
+          return '<g data-id="' + el.id + '"><rect x="' + n(el.x) + '" y="' + n(el.y) + '" width="' + n(el.w) + '" height="' + n(el.h) + '" fill="none" stroke="#9aa7b8" stroke-width="0.2" stroke-dasharray="1.5 1"/>' +
+            textBlock(el.x, el.y, el.w, el.h, show, Object.assign({}, el, { color: '#7a8797' })) +
+            '<text x="' + n(el.x) + '" y="' + n(el.y - 1.2) + '" font-size="2.6" fill="#9aa7b8" font-family="' + esc(M.SANS) + '">只在套印時印出</text></g>';
+        }
         var s = '<g data-id="' + el.id + '">';
         if (el.border) s += '<rect x="' + n(el.x) + '" y="' + n(el.y) + '" width="' + n(el.w) + '" height="' + n(el.h) + '" fill="none" stroke="#000" stroke-width="' + (el.lw || 0.24) + '"/>';
         return s + textBlock(el.x, el.y, el.w, el.h, M.fill(el.text, fieldsOf(P)), el) + '</g>';
