@@ -101,7 +101,7 @@ const ROOT = path.join(__dirname, '..');
     const one = await pg.evaluate(() => document.querySelector('#status').getBoundingClientRect().height <= 31 && /TWD97/.test(document.querySelector('#coord').textContent));
     ok(b0 === b1 && one, '滑鼠進出略圖時狀態列不換行、不推動畫面', { b0, b1 });
   }
-  // 圖名自動加註：只有現況線＝(現況圖)；有分割線的方案依序＝(甲案)、(乙案)；舊專案不加
+  // 圖名自動加註：現況圖不加；有分割線的方案依序＝(甲案)、(乙案)；舊專案不加；方案選單只顯示方案名稱
   r = await pg.evaluate(async () => {
     const wait = () => new Promise(res => setTimeout(res, 500));
     const title = () => Render.fieldsOf(App.P).title;
@@ -114,7 +114,7 @@ const ROOT = path.join(__dirname, '..');
     App.P.settings.titleAuto = true; App.P.userLines = []; App.P.fields.zz = '1'; App.api.checkpoint(); await wait();
     return [t1, t2, t3, t4, document.querySelector('#planSel').textContent];
   });
-  ok(r[0] === '土地複丈成果圖 (現況圖)' && r[1] === '土地複丈成果圖 (甲案)' && r[2] === '土地複丈成果圖' && r[3] === '土地複丈成果圖' && /現況圖/.test(r[4]), '圖名自動加註（現況圖／甲案），舊專案維持原樣', r);
+  ok(r[0] === '土地複丈成果圖' && r[1] === '土地複丈成果圖 (甲案)' && r[2] === '土地複丈成果圖' && r[3] === '土地複丈成果圖' && r[4] === '方案1', '圖名自動加註（現況不加、分割＝甲案），方案選單只顯示名稱，舊專案維持原樣', r);
   // 套印依據：只在套印時印「依據〈囑託法院及文號〉辦理。」，自動放在說明表下方、落在自動框選範圍內
   r = await pg.evaluate(() => {
     App.P.fields.courtDoc = '臺灣苗栗地方法院115年10月05日苗院科民信115苗簡674字\n第1159008815號函。';
@@ -130,6 +130,28 @@ const ROOT = path.join(__dirname, '..');
     P.fields.courtDoc = 'x'; return { over: over.indexOf(want) >= 0, a3: a3.indexOf('辦理') < 0, inside, clear, empty, box: [el.x, el.y, el.w, el.h] };
   });
   ok(r.over && r.a3 && r.inside && r.clear && r.empty, '套印加印「依據…辦理。」（A3 不印、放在說明表下方空白處、沒填文號不印）', r);
+  // 多個方案：現況不加，分割方案依序甲案、乙案
+  r = await pg.evaluate(() => {
+    const P = App.P, m = P.elements.find(e => e.type === 'map'), keep = JSON.stringify(P.plans), kIdx = P.planIdx, ul = P.userLines;
+    const mk = (split) => ({ userLines: split ? [{ role: 'split', x1: m.cx, y1: m.cy, x2: m.cx + 5, y2: m.cy + 5 }] : [], features: [], segStyle: {}, splits: {}, layerRoles: {}, ovs: P.ovs });
+    P.userLines = []; P.plans = [{ name: '現況', data: null }, { name: '分割一', data: mk(true) }, { name: '分割二', data: mk(true) }]; P.planIdx = 0; App.planCads = [App.cad, null, null];
+    App.api.checkpoint(); const tags = P.planTags.slice(), sel = document.querySelector('#planSel').textContent;
+    P.plans = JSON.parse(keep); P.planIdx = kIdx; P.userLines = ul; App.planCads = [App.cad]; App.api.checkpoint();
+    return { tags, sel };
+  });
+  ok(r.tags.join('|') === '|甲案|乙案' && r.sel === '現況分割一分割二', '多方案：現況不加註，分割依序甲案、乙案', r);
+  // 套印依據刪掉後可以加回來（＋新增選單、輸出頁按鈕）
+  r = await pg.evaluate(() => {
+    const P = App.P, el = P.elements.find(e => e.overOnly); App.api.selectFn({ kind: 'el', id: el.id });
+    return P.elements.length;
+  });
+  await pg.keyboard.press('Delete'); await pg.waitForTimeout(150);
+  const gone = await pg.evaluate(() => { document.querySelector('[data-tab=out]').click(); return [!App.P.elements.some(e => e.overOnly), !!document.querySelector('[data-act=overBack]')]; });
+  await pg.click('[data-act=overBack]'); await pg.waitForTimeout(150);
+  const back1 = await pg.evaluate(() => { const e = App.P.elements.find(x => x.overOnly); const ok1 = !!e && e.autoPos && !document.querySelector('[data-act=overBack]'); App.P.elements = App.P.elements.filter(x => !x.overOnly); App.P.noOverNote = true; return ok1; });
+  await pg.click('#rail .dd .ddbtn'); await pg.click('[data-cmd=add-overnote]'); await pg.waitForTimeout(150);
+  const back2 = await pg.evaluate(() => App.P.elements.filter(x => x.overOnly).length === 1 && !App.P.noOverNote);
+  ok(gone[0] && gone[1] && back1 && back2, '套印依據刪掉後可從輸出頁或「＋新增」加回來', { gone, back1, back2 });
   // 未儲存記號
   await pg.waitForTimeout(700);
   r = await pg.evaluate(() => [App.dirty, document.title.indexOf('●') === 0, document.querySelector('#fileName').textContent]);

@@ -41,7 +41,7 @@
   }
   /* 復原紀錄每一筆＝{ s: 專案內容, c: 當時的圖資 }。圖資（匯入的 DXF）不在專案 JSON 裡，
      所以要一起記，復原「匯入 DXF」時圖資才會跟著退回，線段樣式不會對到錯的線。 */
-  /* 各方案的圖名加註：圖上有分割線 → 甲案、乙案…（依方案順序）；只有現況線 → 現況圖；都沒有 → 不加 */
+  /* 各方案的圖名加註：圖上有分割線 → 甲案、乙案…（依方案順序，分割會提好幾案，要分得出來）；現況圖不加註 */
   var planKindCache = new WeakMap();
   function planKind(i) {
     var P = App.P, cur = i === P.planIdx, src = cur ? P : P.plans[i].data, cad = cur ? App.cad : App.planCads[i];
@@ -60,7 +60,7 @@
     var tags = P.plans.map(function (pl, i) {
       var k = planKind(i);
       if (k === 'split') { var t = (STEM[n % 10] || '') + (n >= 10 ? Math.floor(n / 10) : '') + '案'; n++; return t; }
-      return k === 'case' ? '現況圖' : '';
+      return '';
     });
     var changedTags = JSON.stringify(tags) !== JSON.stringify(P.planTags || []);
     if (changedTags) { P.planTags = tags; renderPlanSel(); render(); }
@@ -373,6 +373,14 @@
     requestAnimationFrame(function () { rafPending = false; renderNow(); });
   }
   /* 第二張說明表自動跟在第一張下方 */
+  /* 把套印依據加回來（不小心刪掉或隱藏時用）：已經有就選取並顯示，沒有就新增一個、自動排在說明表下方 */
+  function addOverNote() {
+    var P = App.P, el = overNoteEl(), was = !!el;
+    if (!el) { el = M.overNote(); P.elements.push(el); }
+    delete P.noOverNote; el.hidden = false;
+    layoutOverNote(); select({ kind: 'el', id: el.id }); changed(); renderLayerList(); if (App.tab === 'out') renderOutTab();
+    toast(was ? '「依據…辦理。」已經在版面上（已選取）' : '已加回「依據…辦理。」，自動放在說明表下方');
+  }
   /* 套印依據（「依據○○辦理。」）自動放在說明表下方的空白處，寬度同說明表、高度依字數；拖動過就不再自動排 */
   function overNoteEl() { return App.P.elements.filter(function (e) { return e.overOnly; })[0]; }
   function layoutOverNote() {
@@ -1933,8 +1941,8 @@
     });
     flushShort();
     var tagNow = (App.P.planTags || [])[App.P.planIdx] || '';
-    h += '<div class="sec">圖名加註</div><label class="inline"><input type="checkbox" id="titleAuto"' + (App.P.settings.titleAuto ? ' checked' : '') + '> 圖名後面自動加註：只有現況線時加「(現況圖)」，有分割線時依方案順序加「(甲案)」「(乙案)」…</label>' +
-      '<p class="small">' + (App.P.settings.titleAuto ? (tagNow ? '目前這個方案會加上「 (' + tagNow + ')」。' : '目前圖上還沒有現況線或分割線，所以不加。') : '目前不加註。') + '想自己決定文字時取消勾選，直接把字打在上面的「圖名」裡。</p>';
+    h += '<div class="sec">圖名加註</div><label class="inline"><input type="checkbox" id="titleAuto"' + (App.P.settings.titleAuto ? ' checked' : '') + '> 分割方案的圖名後面自動加「(甲案)」「(乙案)」…（依方案順序；現況圖不加）</label>' +
+      '<p class="small">' + (App.P.settings.titleAuto ? (tagNow ? '目前這個方案有分割線，圖名會加上「 (' + tagNow + ')」。' : '目前這個方案沒有分割線，圖名不加註。') : '目前不加註。') + '想自己決定文字時取消勾選，直接把字打在上面的「圖名」裡。</p>';
     h += '<div class="btnrow"><span class="small">填今天：</span>' + btn('todayRecv', '收件日期') + btn('todaySurvey', '鑑測日期') + btn('today', '核定日期') + '</div>';
     box.innerHTML = h;
     bind(box, F);
@@ -2166,6 +2174,8 @@
     h += '<div id="k8Status">' + (o.region ? k8Status() : '<p class="small">尚未框選範圍；直接按列印會自動框選「說明表＋略圖」。</p>') + '</div>';
     h += '<div class="btnrow">' + btn('print8k', pk === 'a3' ? '列印 A3 套印' : pk === '8k' ? '列印 8K 套印' : '列印套印', 'primary big') + '</div>';
     h += '<div class="btnrow"><span class="small">套印範圍</span>' + btn('regionAuto', '自動框選') + btn('region', '滑鼠框選 (R)') + '</div>';
+    var onEl = overNoteEl();
+    if (!onEl || onEl.hidden) h += '<div class="note">套印的「依據〈囑託法院及文號〉辦理。」那段字目前' + (onEl ? '被隱藏' : '已被刪除') + '，套印時不會印。<div class="btnrow">' + btn('overBack', '加回這段字') + '</div></div>';
     var ph = '<p class="small"><b>A3</b></p><div class="grid2">' + field('紙寬 (mm)', inp('sheet.w', P.sheet.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('sheet.h', P.sheet.h, 'number', 'min="10"')) +
       field('印表位移 X (mm)', inp('sheet.dx', P.sheet.dx, 'number', 'step="0.1"')) + field('印表位移 Y (mm)', inp('sheet.dy', P.sheet.dy, 'number', 'step="0.1"')) + '</div>';
     ph += '<p class="small"><b>套印</b>（印到已經印好格線的圖紙上；紙張用上面的 8K／A3 按鈕切換，其他尺寸在這裡直接填）</p>' +
@@ -2188,6 +2198,7 @@
       if (act === 'printA3') { checkpoint(); Printer.printA3(P, App.cad); }
       if (act === 'print8k') { doPrint8K(); renderOutTab(); }
       if (act === 'region') setTool('region');
+      if (act === 'overBack') addOverNote();
       if (act === 'regionAuto') { if (autoRegion()) { renderOutTab(); render(); changed(); toast('已自動框選 8K 套印範圍'); } else toast('找不到說明表或略圖'); }
       if (act === 'saveTpl') saveTemplate();
       if (act === 'exportTpl') download('略圖範本.ctt', JSON.stringify(templateData()), 'application/json');
@@ -2203,8 +2214,7 @@
   /* ---------- 方案 ---------- */
   function renderPlanSel() {
     var ps = $('#planSel'); if (!ps) return;
-    var tg = App.P.planTags || [];
-    ps.innerHTML = App.P.plans.map(function (pl, i) { return '<option value="' + i + '"' + (i === App.P.planIdx ? ' selected' : '') + '>' + R.esc(pl.name) + (App.P.settings.titleAuto && tg[i] && pl.name.indexOf(tg[i]) < 0 ? '（' + tg[i] + '）' : '') + '</option>'; }).join('');
+    ps.innerHTML = App.P.plans.map(function (pl, i) { return '<option value="' + i + '"' + (i === App.P.planIdx ? ' selected' : '') + '>' + R.esc(pl.name) + '</option>'; }).join('');
   }
   function stashPlan() {
     var P = App.P, d = {};
@@ -2504,6 +2514,7 @@
       else if (c === 'z100') { var r = stage.getBoundingClientRect(), cx = App.view.ox + r.width / App.view.z / 2, cy = App.view.oy + r.height / App.view.z / 2; App.view.z = 96 / 25.4; App.view.ox = cx - r.width / App.view.z / 2; App.view.oy = cy - r.height / App.view.z / 2; render(); }
       else if (c === 'printA3') { checkpoint(); Printer.printA3(App.P, App.cad); }
       else if (c === 'print8k') doPrint8K();
+      else if (c === 'add-overnote') addOverNote();
       else if (c.indexOf('add-') === 0) addElement(c.slice(4));
       else if (c === 'help') $('#dlgHelp').showModal();
       else if (c === 'planAdd') addPlan(); else if (c === 'planRen') renamePlan(); else if (c === 'planDel') deletePlan();

@@ -135,7 +135,7 @@
       userLines: [],
       elements: defaultElements(),
       output: { k8: { w: 388, h: 267, offX: 20, offY: 20, dx: 0, dy: 0, region: null } },
-      settings: { snapEdges: true, faceWithParcel: true, codeScheme: 'alpha', titleAuto: true },   // titleAuto：圖名自動加註（現況圖／甲案、乙案…）
+      settings: { snapEdges: true, faceWithParcel: true, codeScheme: 'alpha', titleAuto: true },   // titleAuto：分割方案的圖名自動加註（甲案、乙案…）；現況圖不加
       planTags: [],
       splits: {},
       ovs: { case: { name: '現況', visible: true, codeScheme: 'alpha' }, split: { name: '分割', visible: true, codeScheme: 'stem', schemeSet: true } },
