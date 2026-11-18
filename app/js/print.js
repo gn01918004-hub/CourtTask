@@ -46,10 +46,23 @@
     var o = P.output.k8, r = o.region;
     if (!r || r.w <= 0 || r.h <= 0) return null;
     var pg = k8Page(P);
+    // 套印到已印好格線的圖紙：外框、左側說明欄這類「只有一部分落在範圍內」的框線不印，
+    // 不然會在預印的格線旁多出一條黑線。完全在範圍內的元件照印；略圖、說明表、文字被切到時照舊裁切。
+    var PP = P;
+    if (!o.keepFrame) {
+      var E = 0.5;
+      PP = Object.assign({}, P, { elements: P.elements.filter(function (el) {
+        if (el.hidden) return false;
+        var b = R.bounds(el, P);
+        var inside = b.x >= r.x - E && b.y >= r.y - E && b.x + b.w <= r.x + r.w + E && b.y + b.h <= r.y + r.h + E;
+        if (inside) return true;
+        return !(el.type === 'rect' || el.type === 'table' || el.type === 'line');
+      }) });
+    }
     var left = (+o.offX || 0) + (+o.dx || 0);
     var top = pg.h - (+o.offY || 0) - r.h + (+o.dy || 0);
     return '<svg xmlns="http://www.w3.org/2000/svg" width="' + n(r.w) + 'mm" height="' + n(r.h) + 'mm" viewBox="' + n(r.x) + ' ' + n(r.y) + ' ' + n(r.w) + ' ' + n(r.h) +
-      '" style="position:absolute;left:' + n(left) + 'mm;top:' + n(top) + 'mm;overflow:hidden">' + R.renderSheet(P, cad, { print: true }) + '</svg>';
+      '" style="position:absolute;left:' + n(left) + 'mm;top:' + n(top) + 'mm;overflow:hidden">' + R.renderSheet(PP, cad, { print: true, over: true }) + '</svg>';
   }
   function print8K(P, cad) {
     var s = regionSVG(P, cad);

@@ -74,12 +74,84 @@ const ROOT = path.join(__dirname, '..');
   r = await pg.evaluate(() => { const d = JSON.parse(JSON.stringify(App.api.fileData())); d.project.output.k8.w = 267; d.project.output.k8.h = 388; App.api.loadData(d); const o = App.P.output.k8; App.P.fields.note1 = '1'; return [o.w, o.h]; });
   await pg.waitForTimeout(500);
   ok(r[0] === 388 && r[1] === 267, '舊專案的 8K 直式設定開啟時改成橫式', r);
+  // 套印不印外框與左側說明欄的框線；可切換成 A3 紙
+  r = await pg.evaluate(() => {
+    const frame = App.P.elements.find(e => e.type === 'rect'), left = App.P.elements.find(e => e.type === 'table'), map = App.P.elements.find(e => e.type === 'map'), ft = App.P.elements.find(e => e.type === 'ftable'), nor = App.P.elements.find(e => e.type === 'north');
+    const has = (svg, el) => svg.indexOf('data-id="' + el.id + '"') >= 0;
+    const s1 = Printer.regionSVG(App.P, App.cad); App.P.output.k8.keepFrame = true; const s2 = Printer.regionSVG(App.P, App.cad); App.P.output.k8.keepFrame = false;
+    App.folds.paper = true; document.querySelector('[data-tab=out]').click();
+    document.querySelector('[data-paper=a3]').click(); App.P.output.k8.offX = 31; const a3 = [App.P.output.k8.w, App.P.output.k8.h, Printer.k8Page(App.P).fits, document.querySelector('[data-act=print8k]').textContent + '|' + document.querySelector('#btnOver').textContent];
+    document.querySelector('[data-paper="8k"]').click(); const off8 = App.P.output.k8.offX; document.querySelector('[data-paper=a3]').click(); const offA = App.P.output.k8.offX; document.querySelector('[data-paper="8k"]').click();
+    if (off8 !== 20 || offA !== 31) a3[2] = false;
+    return { off: [has(s1, frame), has(s1, left), has(s1, map), has(s1, ft), has(s1, nor)], on: [has(s2, frame), has(s2, left)], a3, back: [App.P.output.k8.w, App.P.output.k8.h] };
+  });
+  ok(r.off.join() === 'false,false,true,true,true' && r.on.join() === 'true,true' && r.a3[0] === 420 && r.a3[1] === 297 && r.a3[2] && /A3/.test(r.a3[3]) && r.back.join() === '388,267', '套印不印外框與說明欄框線；紙張可切換 A3', r);
   dialogs = [];
   r = await pg.evaluate(() => { let n = 0; window.print = () => { n++; }; const o = App.P.output.k8, keep = JSON.stringify(o.region); o.region = { x: 0, y: 0, w: 420, h: 297 }; document.querySelector('#toolbar [data-cmd=print8k]').click(); o.region = JSON.parse(keep); return new Promise(res => setTimeout(() => res(n), 200)); });
   ok(dialogs.some(d => /超出/.test(d)), '8K 範圍比紙張大時先提醒', dialogs.map(d => d.slice(0, 30)));
   // 清冊 CSV：25-4 不會被 Excel 當成日期
   r = await pg.evaluate(() => { const f = App.P.features[0]; f.inRegister = true; f.landNo = '25-4'; const s = Printer.registerCSV(App.P, App.P.elements.find(e => e.type === 'ftable')); f.inRegister = false; return s; });
   ok(r.indexOf('"=""25-4"""') > 0, '清冊 CSV 的地號以文字輸出');
+  // 狀態列：滑鼠進出略圖時高度與各格位置不變（不會抖動）
+  {
+    const box = () => pg.evaluate(() => ['#status', '#coord', '#saveState', '#stage'].map(s => { const r = document.querySelector(s).getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(); }).join('|'));
+    await pg.evaluate(() => { document.querySelector('#saveState').textContent = '自動暫存失敗（請手動儲存）'; });
+    await pg.mouse.move(700, 20); const b0 = await box();
+    const pm = await mapPt(10, 10); await pg.mouse.move(pm.x, pm.y); await pg.waitForTimeout(100); const b1 = await box();
+    const one = await pg.evaluate(() => document.querySelector('#status').getBoundingClientRect().height <= 31 && /TWD97/.test(document.querySelector('#coord').textContent));
+    ok(b0 === b1 && one, '滑鼠進出略圖時狀態列不換行、不推動畫面', { b0, b1 });
+  }
+  // 圖名自動加註：現況圖不加；有分割線的方案依序＝(甲案)、(乙案)；舊專案不加；方案選單只顯示方案名稱
+  r = await pg.evaluate(async () => {
+    const wait = () => new Promise(res => setTimeout(res, 500));
+    const title = () => Render.fieldsOf(App.P).title;
+    App.P.features = App.P.features.filter(f => (f.ov || 'case') !== 'split'); App.P.userLines = []; App.P.settings.titleAuto = true;
+    App.api.checkpoint(); const t1 = title();
+    const m = App.P.elements.find(e => e.type === 'map');
+    App.P.userLines.push({ role: 'split', x1: m.cx, y1: m.cy, x2: m.cx + 5, y2: m.cy + 5 }); App.api.checkpoint(); const t2 = title();
+    App.P.settings.titleAuto = false; const t3 = title(); App.P.settings.titleAuto = true;
+    const d = JSON.parse(JSON.stringify(App.api.fileData())); delete d.project.settings.titleAuto; delete d.project.planTags; App.api.loadData(d); const t4 = title();
+    App.P.settings.titleAuto = true; App.P.userLines = []; App.P.fields.zz = '1'; App.api.checkpoint(); await wait();
+    return [t1, t2, t3, t4, document.querySelector('#planSel').textContent];
+  });
+  ok(r[0] === '土地複丈成果圖' && r[1] === '土地複丈成果圖 (甲案)' && r[2] === '土地複丈成果圖' && r[3] === '土地複丈成果圖' && r[4] === '方案1', '圖名自動加註（現況不加、分割＝甲案），方案選單只顯示名稱，舊專案維持原樣', r);
+  // 套印依據：只在套印時印「依據〈囑託法院及文號〉辦理。」，自動放在說明表下方、落在自動框選範圍內
+  r = await pg.evaluate(() => {
+    App.P.fields.courtDoc = '臺灣苗栗地方法院115年10月05日苗院科民信115苗簡674字\n第1159008815號函。';
+    App.api.render(); document.querySelector('[data-tab=out]').click(); document.querySelector('[data-act=regionAuto]').click();
+    const el = App.P.elements.find(e => e.overOnly), rg = App.P.output.k8.region, P = App.P;
+    const fb = P.elements.filter(e => e.type === 'ftable').map(e => Render.bounds(e, P)), low = Math.max(...fb.map(b => b.y + b.h)), mp = P.elements.find(e => e.type === 'map');
+    const want = '依據臺灣苗栗地方法院115年10月05日苗院科民信115苗簡674字第1159008815號函辦理。';
+    const txt = s => (s.match(/<text[^>]*>([^<]*)<\/text>/g) || []).map(x => x.replace(/<[^>]+>/g, '')).join('');
+    const over = txt(Printer.regionSVG(P, App.cad)), a3 = txt(Printer.sheetSVG(P, App.cad));
+    const inside = el.x >= rg.x && el.y >= rg.y && el.x + el.w <= rg.x + rg.w + 0.01 && el.y + el.h <= rg.y + rg.h + 0.01;
+    const clear = el.y >= low + 3 && el.x + el.w <= mp.x;
+    P.fields.courtDoc = ''; const empty = txt(Printer.regionSVG(P, App.cad)).indexOf('依據') < 0;
+    P.fields.courtDoc = 'x'; return { over: over.indexOf(want) >= 0, a3: a3.indexOf('辦理') < 0, inside, clear, empty, box: [el.x, el.y, el.w, el.h] };
+  });
+  ok(r.over && r.a3 && r.inside && r.clear && r.empty, '套印加印「依據…辦理。」（A3 不印、放在說明表下方空白處、沒填文號不印）', r);
+  // 多個方案：現況不加，分割方案依序甲案、乙案
+  r = await pg.evaluate(() => {
+    const P = App.P, m = P.elements.find(e => e.type === 'map'), keep = JSON.stringify(P.plans), kIdx = P.planIdx, ul = P.userLines;
+    const mk = (split) => ({ userLines: split ? [{ role: 'split', x1: m.cx, y1: m.cy, x2: m.cx + 5, y2: m.cy + 5 }] : [], features: [], segStyle: {}, splits: {}, layerRoles: {}, ovs: P.ovs });
+    P.userLines = []; P.plans = [{ name: '現況', data: null }, { name: '分割一', data: mk(true) }, { name: '分割二', data: mk(true) }]; P.planIdx = 0; App.planCads = [App.cad, null, null];
+    App.api.checkpoint(); const tags = P.planTags.slice(), sel = document.querySelector('#planSel').textContent;
+    P.plans = JSON.parse(keep); P.planIdx = kIdx; P.userLines = ul; App.planCads = [App.cad]; App.api.checkpoint();
+    return { tags, sel };
+  });
+  ok(r.tags.join('|') === '|甲案|乙案' && r.sel === '現況分割一分割二', '多方案：現況不加註，分割依序甲案、乙案', r);
+  // 套印依據刪掉後可以加回來（＋新增選單、輸出頁按鈕）
+  r = await pg.evaluate(() => {
+    const P = App.P, el = P.elements.find(e => e.overOnly); App.api.selectFn({ kind: 'el', id: el.id });
+    return P.elements.length;
+  });
+  await pg.keyboard.press('Delete'); await pg.waitForTimeout(150);
+  const gone = await pg.evaluate(() => { document.querySelector('[data-tab=out]').click(); return [!App.P.elements.some(e => e.overOnly), !!document.querySelector('[data-act=overBack]')]; });
+  await pg.click('[data-act=overBack]'); await pg.waitForTimeout(150);
+  const back1 = await pg.evaluate(() => { const e = App.P.elements.find(x => x.overOnly); const ok1 = !!e && e.autoPos && !document.querySelector('[data-act=overBack]'); App.P.elements = App.P.elements.filter(x => !x.overOnly); App.P.noOverNote = true; return ok1; });
+  await pg.click('#rail .dd .ddbtn'); await pg.click('[data-cmd=add-overnote]'); await pg.waitForTimeout(150);
+  const back2 = await pg.evaluate(() => App.P.elements.filter(x => x.overOnly).length === 1 && !App.P.noOverNote);
+  ok(gone[0] && gone[1] && back1 && back2, '套印依據刪掉後可從輸出頁或「＋新增」加回來', { gone, back1, back2 });
   // 未儲存記號
   await pg.waitForTimeout(700);
   r = await pg.evaluate(() => [App.dirty, document.title.indexOf('●') === 0, document.querySelector('#fileName').textContent]);

@@ -41,7 +41,33 @@
   }
   /* 復原紀錄每一筆＝{ s: 專案內容, c: 當時的圖資 }。圖資（匯入的 DXF）不在專案 JSON 裡，
      所以要一起記，復原「匯入 DXF」時圖資才會跟著退回，線段樣式不會對到錯的線。 */
+  /* 各方案的圖名加註：圖上有分割線 → 甲案、乙案…（依方案順序，分割會提好幾案，要分得出來）；現況圖不加註 */
+  var planKindCache = new WeakMap();
+  function planKind(i) {
+    var P = App.P, cur = i === P.planIdx, src = cur ? P : P.plans[i].data, cad = cur ? App.cad : App.planCads[i];
+    if (!src) return '';
+    if (!cur && planKindCache.has(src)) { var c0 = planKindCache.get(src); if (c0.cad === cad) return c0.kind; }
+    var have = {};
+    if (cad) R.eachPiece({ segStyle: src.segStyle || {}, splits: src.splits || {}, layerRoles: src.layerRoles || {}, ovs: src.ovs }, cad, function (pc, role) { if (role === 'case' || role === 'split') have[role] = true; }, { keepMerged: true });
+    (src.userLines || []).forEach(function (l) { have[l.role || 'case'] = true; });
+    (src.features || []).forEach(function (f) { if (f.ov === 'split') have.split = true; });
+    var kind = have.split ? 'split' : have.case ? 'case' : '';
+    if (!cur) planKindCache.set(src, { cad: cad, kind: kind });
+    return kind;
+  }
+  function updatePlanTags() {
+    var P = App.P, n = 0, STEM = '甲乙丙丁戊己庚辛壬癸';
+    var tags = P.plans.map(function (pl, i) {
+      var k = planKind(i);
+      if (k === 'split') { var t = (STEM[n % 10] || '') + (n >= 10 ? Math.floor(n / 10) : '') + '案'; n++; return t; }
+      return '';
+    });
+    var changedTags = JSON.stringify(tags) !== JSON.stringify(P.planTags || []);
+    if (changedTags) { P.planTags = tags; renderPlanSel(); render(); }
+    return changedTags;
+  }
   function checkpoint() {
+    updatePlanTags();
     var cur = snap();
     if (cur === App.lastSnap && App.cad === App.lastCad) return;
     if (App.lastSnap) { App.undo.push({ s: App.lastSnap, c: App.lastCad }); if (App.undo.length > 200) App.undo.shift(); }
@@ -138,6 +164,7 @@
   }
   function loadData(d) {
     if (!d || !d.project) throw new Error('不是本系統的專案檔');
+    if (d.project.settings && d.project.settings.titleAuto == null) d.project.settings.titleAuto = false;   // 舊專案的圖名維持原樣，不自動加註
     App.P = upgrade(d.project);
     if (d.cads) {
       var cads = d.cads.map(unpackCad);
@@ -160,6 +187,10 @@
     if (P.ovs.split && !P.ovs.split.schemeSet) { P.ovs.split.codeScheme = 'stem'; P.ovs.split.schemeSet = true; }
     if (P.settings.codeScheme && !P.ovs.case._mig) { P.ovs.case.codeScheme = P.ovs.case.codeScheme || P.settings.codeScheme; }
     ['parcelLine', 'caseLine', 'splitLine', 'otherLine'].forEach(function (k) { P.styles[k] = Object.assign({}, base.styles[k], P.styles[k] || {}); });
+    // 舊專案、舊範本補上套印依據（每個方案的版面都補；使用者自己刪掉的不再補）
+    if (!P.noOverNote) [P.elements].concat((P.plans || []).map(function (pl) { return pl.data && pl.data.elements; })).forEach(function (els) {
+      if (els && !els.some(function (e) { return e.overOnly; })) els.push(M.overNote());
+    });
     P.elements.forEach(function (e) {
       if (e.type === 'ftable' && !e.columns) {
         var keys = ['code', 'area', 'landNo', 'note'];
@@ -213,10 +244,11 @@
     return readFile(file).then(function (buf) {
       var m = M02.parse(buf), r = M02.toProject(m);
       checkpoint();
-      App.P = upgrade(r.project); App.cad = r.cad.lines.length || r.cad.texts.length ? r.cad : null;
+      App.P = upgrade(r.project); App.P.settings.titleAuto = false; App.cad = r.cad.lines.length || r.cad.texts.length ? r.cad : null;
       App.planCads = [App.cad]; fileHandle = null;
       App.P.fields.caseName = file.name.replace(/\.m02$/i, '');
       App.P.plans[0].name = '舊檔';
+      App.P.elements = App.P.elements.filter(function (e) { return !e.overOnly; });   // 舊檔是已完成的成果，不自動加套印依據
       resetHistory(); App.sel = null; App.selCell = null;
       setDirty(false); refreshAll(); fitView(); autosave();
       var unk = Object.keys(r.report.unknown).length ? '；略過不支援的物件（影像等）' + Object.keys(r.report.unknown).map(function (k) { return r.report.unknown[k]; }).reduce(function (a, b) { return a + b; }, 0) + ' 個' : '';
@@ -341,6 +373,29 @@
     requestAnimationFrame(function () { rafPending = false; renderNow(); });
   }
   /* 第二張說明表自動跟在第一張下方 */
+  /* 把套印依據加回來（不小心刪掉或隱藏時用）：已經有就選取並顯示，沒有就新增一個、自動排在說明表下方 */
+  function addOverNote() {
+    var P = App.P, el = overNoteEl(), was = !!el;
+    if (!el) { el = M.overNote(); P.elements.push(el); }
+    delete P.noOverNote; el.hidden = false;
+    layoutOverNote(); select({ kind: 'el', id: el.id }); changed(); renderLayerList(); if (App.tab === 'out') renderOutTab();
+    toast(was ? '「依據…辦理。」已經在版面上（已選取）' : '已加回「依據…辦理。」，自動放在說明表下方');
+  }
+  /* 套印依據（「依據○○辦理。」）自動放在說明表下方的空白處，寬度同說明表、高度依字數；拖動過就不再自動排 */
+  function overNoteEl() { return App.P.elements.filter(function (e) { return e.overOnly; })[0]; }
+  function layoutOverNote() {
+    var P = App.P, el = overNoteEl(); if (!el || !el.autoPos || el.hidden) return;
+    var fts = P.elements.filter(function (e) { return e.type === 'ftable' && !e.hidden; }), mp = maps()[0], x, y, w;
+    if (fts.length) {
+      var bs = fts.map(function (e) { return R.bounds(e, P); });
+      x = Math.min.apply(null, bs.map(function (b) { return b.x; }));
+      w = Math.max.apply(null, bs.map(function (b) { return b.x + b.w; })) - x;
+      y = Math.max.apply(null, bs.map(function (b) { return b.y + b.h; })) + 4;
+    } else if (mp) { x = mp.x; w = Math.min(mp.w, 120); y = mp.y + mp.h + 4; } else return;
+    w = Math.max(w, 60);
+    var lines = M.wrap(M.fill(el.text, R.fieldsOf(P)), w - 1.6, el.fs || 4.15, el.font || 'kai').length;
+    el.x = round(x, 2); el.y = round(y, 2); el.w = round(w, 2); el.h = round(Math.max(7, lines * (el.fs || 4.15) * (el.lh || 1.3) + 1.6), 2);
+  }
   function layoutStacked() {
     App.P.elements.forEach(function (e) {
       if (!e.stackBelow) return;
@@ -355,7 +410,7 @@
   }
   function renderNow() {
     applyView();
-    layoutStacked();
+    layoutStacked(); layoutOverNote();
     var P = App.P, s = '';
     s += '<defs><filter id="shadow" x="-5%" y="-5%" width="110%" height="110%"><feDropShadow dx="0.6" dy="0.8" stdDeviation="1.2" flood-opacity="0.25"/></filter></defs>';
     s += '<rect x="0" y="0" width="' + P.sheet.w + '" height="' + P.sheet.h + '" fill="#fff" filter="url(#shadow)"/>';
@@ -764,7 +819,7 @@
     // 狀態列座標
     var m = mapAt(p), st = '紙上 ' + round(p[0], 1) + ', ' + round(p[1], 1) + ' mm';
     if (m) { var w = R.mapView(m).toW(p[0], p[1]); st += '　｜　TWD97 E ' + w[0].toFixed(3) + '　N ' + w[1].toFixed(3) + '　(1/' + m.scale + ')'; }
-    $('#coord').textContent = st;
+    $('#coord').textContent = st; $('#coord').title = st;
     var hm = m ? m.id : null;
     if (App.tool === 'pan' && hm !== App.hoverMap) { App.hoverMap = hm; render(); }
 
@@ -806,10 +861,10 @@
       }
       case 'move':
         if (!drag.moved && Math.hypot(dx, dy) < 2 / App.view.z) return;
-        drag.moved = true; el = drag.el; o = drag.orig; delete el.stackBelow; delete el.matchWidth;
+        drag.moved = true; el = drag.el; o = drag.orig; delete el.stackBelow; delete el.matchWidth; delete el.autoPos;
         var sd = ev.altKey ? [dx, dy] : snapMove(el, drag.b, dx, dy);
         el.x = round(o.x + sd[0], 2); el.y = round(o.y + sd[1], 2); break;
-      case 'resize': resizeEl(drag, dx, dy, ev); break;
+      case 'resize': delete drag.el.autoPos; resizeEl(drag, dx, dy, ev); break;
       case 'divider': dragDivider(drag, dx, dy); break;
       case 'vertex': {
         var sv = snapWorld(drag.m, p); App.snapPt = sv.p;
@@ -1346,7 +1401,7 @@
   }
   function deleteSel() {
     var s = App.sel, P = App.P; if (!s) return;
-    if (s.kind === 'el') { var el = elById(s.id); if (el && el.locked) return toast('元件已鎖定'); P.elements = P.elements.filter(function (e) { return e.id !== s.id; }); }
+    if (s.kind === 'el') { var el = elById(s.id); if (el && el.locked) return toast('元件已鎖定'); if (el && el.overOnly) P.noOverNote = true; P.elements = P.elements.filter(function (e) { return e.id !== s.id; }); }
     else if (s.kind === 'feature' || s.kind === 'flabel') P.features = P.features.filter(function (f) { return f.id !== s.id; });
     else if (s.kind === 'anno') P.annos = P.annos.filter(function (a) { return a.id !== s.id; });
     else if (s.kind === 'uline') P.userLines.splice(s.idx, 1);
@@ -1505,6 +1560,7 @@
           field('線型', dashSel('dash', el.dash)) + (el.type === 'line' ? field('箭頭', arrowSel('arrow', el.arrow)) : '') + '</div>';
       }
       if (el.type === 'north') h += field('文字', inp('label', el.label || '北'));
+      if (el.overOnly) h += '<div class="note">這段字<b>只在套印時印出</b>（A3 成果圖左欄已有文號，不會印）。<br>{courtDocBare} 會帶入「囑託法院及文號」。' + (el.autoPos ? '目前自動排在說明表下方；拖動它就會固定在你放的位置。' : '') + '</div>' + (el.autoPos ? '' : '<div class="btnrow">' + btn('overAuto', '放回說明表下方（自動排）') + '</div>');
       if (el.type === 'map') h += mapProps(el);
       if (isTbl) h += '<div class="btnrow">' + (App.tableEdit === el.id ? btn('tedit', '結束表格編輯 (Esc)', 'primary') : btn('tedit', '編輯表格（或雙擊表格）')) + '</div>';
       if (el.type === 'table') h += tableProps(el);
@@ -1523,6 +1579,7 @@
         if (act === 'front') reorder(el.id, 'top'); else if (act === 'back') reorder(el.id, 'bottom');
         else if (act === 'dup') duplicateEl(el.id); else if (act === 'del') deleteSel();
         else if (act === 'tedit') setTableEdit(App.tableEdit === el.id ? null : el.id);
+        else if (act === 'overAuto') { el.autoPos = true; render(); changed(); renderProps(); }
         else elAction(el, act, a);
       };
       return;
@@ -1883,10 +1940,14 @@
       if (f.short) shortBuf.push(field(f.label, html)); else { flushShort(); h += field(f.label + ' <code>{' + f.key + '}</code>', html); }
     });
     flushShort();
+    var tagNow = (App.P.planTags || [])[App.P.planIdx] || '';
+    h += '<div class="sec">圖名加註</div><label class="inline"><input type="checkbox" id="titleAuto"' + (App.P.settings.titleAuto ? ' checked' : '') + '> 分割方案的圖名後面自動加「(甲案)」「(乙案)」…（依方案順序；現況圖不加）</label>' +
+      '<p class="small">' + (App.P.settings.titleAuto ? (tagNow ? '目前這個方案有分割線，圖名會加上「 (' + tagNow + ')」。' : '目前這個方案沒有分割線，圖名不加註。') : '目前不加註。') + '想自己決定文字時取消勾選，直接把字打在上面的「圖名」裡。</p>';
     h += '<div class="btnrow"><span class="small">填今天：</span>' + btn('todayRecv', '收件日期') + btn('todaySurvey', '鑑測日期') + btn('today', '核定日期') + '</div>';
     box.innerHTML = h;
     bind(box, F);
     $$('[data-k]', box).forEach(function (i) { i.addEventListener('change', function () { savePref(i.dataset.k, i.value); }); });
+    $('#titleAuto', box).onchange = function () { App.P.settings.titleAuto = this.checked; changed(); render(); renderPlanSel(); renderCaseTab(); };
     box.onclick = function (ev) {
       var a = ev.target.closest('[data-act]'); if (!a) return;
       var pre = { today: 'ap', todayRecv: 'recv', todaySurvey: 'survey' }[a.dataset.act];
@@ -2107,29 +2168,37 @@
     var box = $('#tab-out'), P = App.P, o = P.output.k8, h = '';
     h += '<div class="sec">A3 成果圖（1:1）</div>';
     h += '<div class="btnrow">' + btn('printA3', '列印 A3 成果圖', 'primary big') + '</div>';
-    h += '<div class="sec">8K 圖紙套印（框選部分 1:1）</div>';
+    var pk = overPaperKey(o);
+    h += '<div class="sec">圖紙套印（框選部分 1:1）</div>';
+    h += '<div class="seg2"><span>套印用的紙張</span><button data-paper="8k" class="' + (pk === '8k' ? 'on' : '') + '">8K</button><button data-paper="a3" class="' + (pk === 'a3' ? 'on' : '') + '">A3</button>' + (pk ? '' : '<span class="small" style="margin-left:8px">目前是自訂 ' + o.w + '×' + o.h + '</span>') + '</div>';
     h += '<div id="k8Status">' + (o.region ? k8Status() : '<p class="small">尚未框選範圍；直接按列印會自動框選「說明表＋略圖」。</p>') + '</div>';
-    h += '<div class="btnrow">' + btn('print8k', '列印 8K 套印', 'primary big') + '</div>';
+    h += '<div class="btnrow">' + btn('print8k', pk === 'a3' ? '列印 A3 套印' : pk === '8k' ? '列印 8K 套印' : '列印套印', 'primary big') + '</div>';
     h += '<div class="btnrow"><span class="small">套印範圍</span>' + btn('regionAuto', '自動框選') + btn('region', '滑鼠框選 (R)') + '</div>';
+    var onEl = overNoteEl();
+    if (!onEl || onEl.hidden) h += '<div class="note">套印的「依據〈囑託法院及文號〉辦理。」那段字目前' + (onEl ? '被隱藏' : '已被刪除') + '，套印時不會印。<div class="btnrow">' + btn('overBack', '加回這段字') + '</div></div>';
     var ph = '<p class="small"><b>A3</b></p><div class="grid2">' + field('紙寬 (mm)', inp('sheet.w', P.sheet.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('sheet.h', P.sheet.h, 'number', 'min="10"')) +
       field('印表位移 X (mm)', inp('sheet.dx', P.sheet.dx, 'number', 'step="0.1"')) + field('印表位移 Y (mm)', inp('sheet.dy', P.sheet.dy, 'number', 'step="0.1"')) + '</div>';
-    ph += '<p class="small"><b>8K</b>（紙夾標示 267×388，橫放：寬 388、高 267）</p><div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number', 'min="10"')) +
+    ph += '<p class="small"><b>套印</b>（印到已經印好格線的圖紙上；紙張用上面的 8K／A3 按鈕切換，其他尺寸在這裡直接填）</p>' +
+      '<div class="grid2">' + field('紙寬 (mm)', inp('output.k8.w', o.w, 'number', 'min="10"')) + field('紙高 (mm)', inp('output.k8.h', o.h, 'number', 'min="10"')) +
       field('左下平移 X (mm)', inp('output.k8.offX', o.offX, 'number', 'step="0.1"')) + field('左下平移 Y (mm)', inp('output.k8.offY', o.offY, 'number', 'step="0.1"')) +
       field('印表位移 X', inp('output.k8.dx', o.dx, 'number', 'step="0.1"')) + field('印表位移 Y', inp('output.k8.dy', o.dy, 'number', 'step="0.1"')) + '</div>';
-    if (o.region) ph += '<p class="small"><b>8K 套印範圍</b>（mm，可直接改數字）</p><div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
+    if (o.region) ph += '<p class="small"><b>套印範圍</b>（mm，可直接改數字）</p><div class="grid2">' + field('範圍 X', inp('output.k8.region.x', o.region.x, 'number', 'step="0.1"')) + field('範圍 Y', inp('output.k8.region.y', o.region.y, 'number', 'step="0.1"')) +
       field('範圍寬', inp('output.k8.region.w', o.region.w, 'number', 'step="0.1" min="1"')) + field('範圍高', inp('output.k8.region.h', o.region.h, 'number', 'step="0.1" min="1"')) + '</div>';
-    ph += '<p class="small">印表機若有固定偏移，用「印表位移」校正。</p>';
+    ph += '<label class="inline">' + chk('output.k8.keepFrame', o.keepFrame) + ' 套印時也印外框和左側說明欄的框線（圖紙上已經印好格線時不要勾）</label>';
+    ph += '<p class="small">「左下平移」是範圍的左下角離紙張左下角多遠，換一種圖紙要重新量。印表機若有固定偏移，用「印表位移」校正。</p>';
     h += fold('paper', '紙張、平移與位移設定', ph);
-    h += '<div class="note"><b>列印視窗請這樣設定</b><br>紙張＝A3（8K 選紙夾的 8K 自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設 100%</b>，勾選「背景圖形」。<br>送審核定後：到「案件資料」填核定日期，再印一次 A3' + (P.fields.copies ? '（本案 <b>' + R.esc(P.fields.copies) + '</b> 份）' : '') + '。</div>';
+    h += '<div class="note"><b>列印視窗請這樣設定</b><br>紙張＝A3（8K 套印選紙夾的 8K 自訂紙張）、邊界＝<b>無</b>、縮放＝<b>預設 100%</b>，勾選「背景圖形」。<br>送審核定後：到「案件資料」填核定日期，再印一次 A3' + (P.fields.copies ? '（本案 <b>' + R.esc(P.fields.copies) + '</b> 份）' : '') + '。</div>';
     h += fold('tpl', '版面範本', '<p class="small">把目前的版面存成範本，開新案件時選用；匯出成檔案可以帶到別台電腦。</p><div class="btnrow">' + btn('saveTpl', '目前版面存成範本') + btn('exportTpl', '匯出範本檔') + btn('importTpl', '匯入範本檔') + '</div>');
     box.innerHTML = h;
-    bind(box, P, function () { render(); var ks = $('#k8Status', box); if (ks && o.region) ks.innerHTML = k8Status(); });
+    bind(box, P, function () { render(); updateOverBtn(); var ks = $('#k8Status', box); if (ks && o.region) ks.innerHTML = k8Status(); });
     box.onclick = function (ev) {
+      var pb = ev.target.closest('[data-paper]'); if (pb) { setOverPaper(pb.dataset.paper); return; }
       var a = ev.target.closest('[data-act]'); if (!a) return;
       var act = a.dataset.act;
       if (act === 'printA3') { checkpoint(); Printer.printA3(P, App.cad); }
       if (act === 'print8k') { doPrint8K(); renderOutTab(); }
       if (act === 'region') setTool('region');
+      if (act === 'overBack') addOverNote();
       if (act === 'regionAuto') { if (autoRegion()) { renderOutTab(); render(); changed(); toast('已自動框選 8K 套印範圍'); } else toast('找不到說明表或略圖'); }
       if (act === 'saveTpl') saveTemplate();
       if (act === 'exportTpl') download('略圖範本.ctt', JSON.stringify(templateData()), 'application/json');
@@ -2186,6 +2255,30 @@
     renderPlanSel(); autosave();
   }
 
+  /* 套印用的紙張：8K 或 A3。每種紙各自記住自己的左下平移與印表位移，切回來不用重量 */
+  var OVER_PAPERS = { '8k': { name: '8K', w: 388, h: 267 }, a3: { name: 'A3', w: 420, h: 297 } };
+  function overPaperKey(o) { o = o || App.P.output.k8; return (+o.w === 388 && +o.h === 267) ? '8k' : (+o.w === 420 && +o.h === 297) ? 'a3' : ''; }
+  function setOverPaper(key) {
+    var pp = OVER_PAPERS[key]; if (!pp) return;
+    var apply = function (o) {
+      if (!o) return;
+      var old = overPaperKey(o) || 'custom'; if (old === key) return;
+      o.papers = o.papers || {};
+      o.papers[old] = { w: o.w, h: o.h, offX: o.offX, offY: o.offY, dx: o.dx, dy: o.dy };
+      var m = o.papers[key] || {};
+      o.w = pp.w; o.h = pp.h;
+      ['offX', 'offY', 'dx', 'dy'].forEach(function (k) { if (m[k] != null) o[k] = m[k]; });
+    };
+    apply(App.P.output.k8);
+    App.P.plans.forEach(function (pl) { if (pl.data && pl.data.output) apply(pl.data.output.k8); });   // 所有方案一起換
+    changed(); updateOverBtn(); if (App.tab === 'out') renderOutTab();
+    var o2 = App.P.output.k8;
+    toast('套印紙張改為 ' + pp.name + '（寬 ' + pp.w + ' × 高 ' + pp.h + ' mm）；左下平移目前是 X' + o2.offX + '、Y' + o2.offY + '，請依這種圖紙確認', 6000);
+  }
+  function updateOverBtn() {
+    var b = $('#btnOver'); if (!b) return;
+    var k = overPaperKey(); b.textContent = (k ? OVER_PAPERS[k].name + ' ' : '') + '套印';
+  }
   /* 8K 列印：範圍比直式紙張寬、橫式放得下時自動改橫式；怎麼放都放不下就先提醒，不會默默裁掉 */
   function doPrint8K() {
     var P = App.P;
@@ -2196,6 +2289,10 @@
     if (!pg.fits && !confirm('8K 套印範圍比紙張大，超出的部分會印不出來：\n' +
       (pg.overW > 0 ? '・寬度超出 ' + round(pg.overW, 1) + ' mm\n' : '') + (pg.overH > 0 ? '・高度超出 ' + round(pg.overH, 1) + ' mm\n' : '') +
       '（紙張 ' + pg.w + '×' + pg.h + ' mm，已含左下平移）\n\n按「確定」＝照樣列印\n按「取消」＝回「輸出」頁調整範圍或紙張大小')) { switchTab('out'); return; }
+    layoutOverNote();
+    var on = overNoteEl(), rg = P.output.k8.region;
+    if (on && !on.hidden && R.fieldsOf(P).courtDocBare && (on.x < rg.x - 0.5 || on.y < rg.y - 0.5 || on.x + on.w > rg.x + rg.w + 0.5 || on.y + on.h > rg.y + rg.h + 0.5) &&
+      !confirm('「依據…辦理。」那段字有一部分在套印範圍外面，會印不完整。\n\n按「確定」＝照樣列印\n按「取消」＝回去按「自動框選」，或把那段字拖進範圍內')) { switchTab('out'); return; }
     if (pg.swapped) toast('套印範圍比直式紙張寬，已自動改用橫式 ' + pg.w + '×' + pg.h + ' mm 列印（紙張請橫放）', 6000);
     Printer.print8K(P, App.cad);
   }
@@ -2208,7 +2305,9 @@
   /* 8K 套印範圍：左側說明欄右緣 → 外框右緣；外框頂端 → 略圖、說明表、指北針的最底部（不含主任、日期） */
   function autoRegion() {
     var P = App.P, B = function (e) { return R.bounds(e, P); };
-    var parts = P.elements.filter(function (e) { return !e.hidden && (e.type === 'map' || e.type === 'ftable' || e.type === 'north'); });
+    layoutOverNote();
+    var hasDoc = !!R.fieldsOf(P).courtDocBare;
+    var parts = P.elements.filter(function (e) { return !e.hidden && (e.type === 'map' || e.type === 'ftable' || e.type === 'north' || (e.overOnly && hasDoc)); });
     if (!parts.length) return false;
     var frame = P.elements.filter(function (e) { return e.type === 'rect' && !e.hidden; }).sort(function (a, b) { return b.w * b.h - a.w * a.h; })[0];
     var left = P.elements.filter(function (e) { return e.type === 'table' && !e.hidden; })[0];
@@ -2304,7 +2403,7 @@
       assign: '改歸屬：先在畫面上方選「改成」哪一層，再點線段（Shift＝整串、拖曳＝框選）',
       lsel: '框選線段：在略圖內拖曳矩形，選取完全在框內的現況/分割線（不含地籍線），再到右側改歸屬或線型'
     };
-    $('#toolTip').textContent = tips[t] || '';
+    $('#toolTip').textContent = tips[t] || ''; $('#toolTip').title = tips[t] || '';
     renderAssignBar();
     render();
   }
@@ -2318,7 +2417,7 @@
     };
     $$('.tabs [data-tab]').forEach(function (b) { b.classList.toggle('done', !!done[b.dataset.tab]); });
   }
-  function refreshAll() { refreshPanels(); renderPlanSel(); updateOvBadge(); updateSteps(); updateLockBar(); render(); }
+  function refreshAll() { updatePlanTags(); updateOverBtn(); refreshPanels(); renderPlanSel(); updateOvBadge(); updateSteps(); updateLockBar(); render(); }
 
   /* ================= 鍵盤 ================= */
   function onKey(ev) {
@@ -2415,6 +2514,7 @@
       else if (c === 'z100') { var r = stage.getBoundingClientRect(), cx = App.view.ox + r.width / App.view.z / 2, cy = App.view.oy + r.height / App.view.z / 2; App.view.z = 96 / 25.4; App.view.ox = cx - r.width / App.view.z / 2; App.view.oy = cy - r.height / App.view.z / 2; render(); }
       else if (c === 'printA3') { checkpoint(); Printer.printA3(App.P, App.cad); }
       else if (c === 'print8k') doPrint8K();
+      else if (c === 'add-overnote') addOverNote();
       else if (c.indexOf('add-') === 0) addElement(c.slice(4));
       else if (c === 'help') $('#dlgHelp').showModal();
       else if (c === 'planAdd') addPlan(); else if (c === 'planRen') renamePlan(); else if (c === 'planDel') deletePlan();
@@ -2444,7 +2544,7 @@
     IDB.get('autosave').then(function (v) { restore(v || lsGet('courttask.autosave')); }, function () { restore(lsGet('courttask.autosave')); });
   }
 
-  App.api = { loadData: loadData, fileData: fileData, selectFn: select, setTool: setTool, render: renderNow, fitView: fitView, importParsed: function (name, data) {
+  App.api = { checkpoint: function () { checkpoint(); }, loadData: loadData, fileData: fileData, selectFn: select, setTool: setTool, render: renderNow, fitView: fitView, importParsed: function (name, data) {
     App.cad = { name: name, lines: data.lines, texts: data.texts }; maps().forEach(function (m) { centerMap(m, 'auto'); }); refreshAll(); changed();
   }, addFaceAt: addFaceAt, centerMap: centerMap };
   document.addEventListener('DOMContentLoaded', init);
