@@ -8,10 +8,13 @@
 
 ## 部署到內網
 
-散發檔是 `dist/CourtTask_v<版本>.zip`，解壓縮後有兩種用法，功能完全相同，擇一即可：
+散發檔放在 GitHub 的 **Releases**，附件只有一個檔案 `CourtTask.html`（單一檔案版，檔名固定、不含版本號）。
 
-- **單一檔案版**：`CourtTask.html`。把這一個檔案複製到內網電腦，例如 `D:\CourtTask\CourtTask.html`，用 Chrome 開啟就能使用。最容易搬移。
-- **多檔版**：`app\index.html`，需要整個 `app` 資料夾一起複製。日後只更新個別檔案時比較方便。
+- **永遠下載最新版**：https://github.com/gn01918004-hub/CourtTask/releases/latest/download/CourtTask.html
+- 各版本的修改說明與舊版下載：https://github.com/gn01918004-hub/CourtTask/releases
+- 版本號看 Release 標題，或開啟程式後看左上角「法院略圖繪製系統 v○.○」。
+
+在外網電腦下載 `CourtTask.html` 後，複製到內網電腦（例如 `D:\CourtTask\CourtTask.html`），用 Chrome 開啟就能使用。更新時直接用新檔覆蓋舊檔，專案檔 (.ctp) 不受影響。
 
 注意事項：
 - 不需要安裝、不需要網路、不需要伺服器，也不會連到任何外部網址。
@@ -19,7 +22,8 @@
 - 字型會使用 Windows 內建的「標楷體 (DFKai-SB)」和 Arial。
 - 資料只存在本機：專案檔 (.ctp) 請自行存到固定資料夾或共用磁碟；瀏覽器另有自動暫存，但換電腦、清除瀏覽器資料就會消失。
 - 範本存在瀏覽器裡，換電腦時請用「輸出 → 匯出範本檔」帶過去。
-- 打包方式（開發用）：`python3 tools/build.py 2.11`，驗證方式：`node tests/dist.js`。
+- 打包方式（開發用）：版本號寫在 `app/js/version.js`，`python3 tools/build.py` 產生 `dist/CourtTask.html`，驗證方式：`node tests/dist.js`。
+- 發布：版本號改過的程式合併到 `main` 後，GitHub Actions 會自動建立 Release「法院略圖繪製系統 vX.Y」並附上 `CourtTask.html`。
 
 ## 作業流程
 
@@ -80,6 +84,14 @@
 - 「說明」頁的清單不分現況和分割，全部列在一起、編號連續。現況和分割只影響線條圖層，顯示開關在「圖層」頁。
 - 說明表可勾選「資料列高自動配合文字」。
 - 左上「土地坐落」：縣市、鄉鎮、段名稱各自一格，輸入「苗栗縣」或「苗栗」都會對齊。
+
+## v2.12：改用 GitHub Releases 發布
+
+- 散發檔改放 GitHub 的 Releases，附件固定叫 `CourtTask.html`（單一檔案版），檔名不含版本號。
+- 下載最新版的網址永遠不變：https://github.com/gn01918004-hub/CourtTask/releases/latest/download/CourtTask.html
+- 版本號只寫在 Release 標題和程式裡：開啟後左上角會顯示「法院略圖繪製系統 v2.12」。
+- 儲存庫不再放 zip。多檔版（`app` 資料夾）不再另外打包，需要時直接用儲存庫裡的 `app/`。
+- 功能和 v2.11 相同。
 
 ## v2.11：圖名加註只用在分割方案；套印依據可以加回來
 
@@ -301,6 +313,6 @@ M02_DIR=/path/to/m02範例 bash tests/run_all.sh          # 另外測 .m02（含
 - `tests/overlay.js`：苑西 635（現況／分割分層、假合併、改歸屬、右鍵、兩張說明表、清冊、拖拉規則）
 - `tests/fixes.js`：v2.5 修正項目的回歸測試（面內的島、配賦分層、復原圖資、8K 紙張方向、防呆、量距）
 - `tests/m02.js`：開啟舊系統 .m02
-- `tests/dist.js`：在**斷網**環境下測試散發版（單檔版與多檔版）
+- `tests/dist.js`：重新打包後，在**斷網**環境下測試散發版 `CourtTask.html`（也檢查版本號）
 
 程式結構（`app/js`）：`geom.js` 幾何、`dxf.js` DXF 讀寫、`m02.js` 舊系統 .m02 讀取、`model.js` 資料模型與範本、`render.js` 繪製、`print.js` 列印、清冊、DXF 匯出、`app.js` 介面操作。
