@@ -1,0 +1,55 @@
+# 自動發布 GitHub Release
+# - main 上的 app/js/version.js 版本號變了（例如 2.12 → 2.13），就建立 Release「法院略圖繪製系統 vX.Y」，
+#   附件固定叫 CourtTask.html，所以
+#   https://github.com/<帳號>/CourtTask/releases/latest/download/CourtTask.html 永遠下載到最新版。
+# - 版本號沒變就不會重發（避免同一個版本號內容不一樣）。
+# - 要重新上傳目前版本的附件：Actions → 發布 Release → Run workflow。
+name: 發布 Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', 'tools/build.py', 'README.md']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 打包 CourtTask.html
+        id: build
+        run: |
+          python3 tools/build.py
+          V=$(sed -nE "s/.*APP_VERSION *= *'([0-9.]+)'.*/\1/p" app/js/version.js)
+          echo "ver=$V" >> "$GITHUB_OUTPUT"
+
+      - name: 建立或更新 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.build.outputs.ver }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if gh release view "v$V" >/dev/null 2>&1; then
+            if [ "$EVENT" = "workflow_dispatch" ]; then
+              gh release upload "v$V" dist/CourtTask.html --clobber
+              gh release edit "v$V" --notes-file dist/release_notes.md
+              echo "已重新上傳 v$V 的附件"
+            else
+              echo "v$V 已經發布過，版本號沒變，不重發"
+            fi
+          else
+            gh release create "v$V" dist/CourtTask.html \
+              --title "法院略圖繪製系統 v$V" \
+              --notes-file dist/release_notes.md \
+              --target "$GITHUB_SHA" --latest
+            echo "已發布 v$V"
+          fi

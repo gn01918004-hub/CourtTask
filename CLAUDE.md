@@ -7,19 +7,23 @@
 1. `git fetch --all --prune`，抓下**所有**遠端分支。
 2. 每個分支都要看：
    - 最後一次提交的時間與訊息：`git log -1 --format='%h %ci %s' <分支>`
-   - `dist/` 裡的版本號：`git ls-tree --name-only <分支> dist/`（例如 `CourtTask_v2.6.zip`）
+   - 程式裡的版本號：`git show <分支>:app/js/version.js | grep APP_VERSION`（例如 `'2.12'`）
+   - 已發布的最新 Release（GitHub MCP 的 `get_latest_release`）
    - README 裡最新的版本說明章節（例如「## v2.6：…」）
 3. 找出版本號最大、時間最新的分支，**以它為基礎**接著改。如果你被指定在別的分支工作，先把最新版本合併進來（`git merge origin/<最新分支>`），不要從舊版本改起。
 4. 如果有兩個分支各自改了不同的東西、版本號一樣或分不出先後，**先問使用者要以哪個為準**，不要自行判斷後覆蓋。
    `main` 是穩定版：交付後經使用者同意，把最新版本合併回 `main`，讓之後從 `main` 開始的對話也能拿到最新版與這份規則。
 5. 開始改之前，先用一句話告訴使用者：「目前最新是 vX.Y，在 ○○ 分支」。
 
-## 2. 版本與打包
+## 2. 版本與發布（GitHub Releases）
 
-- 每次交付都把版本號加一（例如 v2.6 → v2.7），並在 README 的版本說明區（「## 介面（v1.2）」之後，新的放在最上面）加一個「## vX.Y：…」章節，寫下這次改了什麼。
-- 打包：`python3 tools/build.py X.Y`，會產生 `dist/CourtTask_vX.Y.zip`（內含單檔版 `CourtTask.html`、多檔版 `app/`、`README.txt`）。
-- 只保留最新的 zip，舊版用 `git rm` 刪掉。
-- 交付時把 zip 傳給使用者。
+- 版本號**只寫在 `app/js/version.js`**（`window.APP_VERSION = 'X.Y'`）。每次交付加一（例如 2.12 → 2.13），畫面左上角會自動顯示。
+- 在 README 的版本說明區（「## 介面（v1.2）」之後，新的放在最上面）加一個「## vX.Y：…」章節，寫下這次改了什麼；Release 說明就從這段擷取，沒寫打包會失敗。
+- 打包：`python3 tools/build.py`，產生 `dist/CourtTask.html`（單檔版）與 `dist/release_notes.md`。`dist/` 不進版控，儲存庫不放 zip。
+- 發布：經使用者同意合併到 `main` 後，GitHub Actions（`.github/workflows/release.yml`）自動建立 Release「法院略圖繪製系統 vX.Y」（tag `vX.Y`），附件檔名固定為 `CourtTask.html`，不含版本號。
+  - 最新版下載網址永遠是 `https://github.com/gn01918004-hub/CourtTask/releases/latest/download/CourtTask.html`。
+  - 版本號沒變的話不會重發；要重傳附件就手動執行該 workflow。
+- 交付時把 `dist/CourtTask.html` 傳給使用者，並附上 Release 的連結。
 
 ## 3. 測試（交付前必做）
 
