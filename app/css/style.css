@@ -102,7 +102,7 @@ table.flist td:first-child input { width: 38px; }
 .ov-label { fill: #1f6feb; font-family: "Microsoft JhengHei", sans-serif; }
 
 #toast:empty { display: none; }
-#toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); background: #12355b; color: #fff; padding: 8px 16px; border-radius: 6px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 50; }
+#toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); background: #12355b; color: #fff; padding: 8px 16px; border-radius: 6px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 50; white-space: pre-line; max-width: 80vw; }
 #toast.show { opacity: .95; }
 
 dialog { border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; max-width: 640px; }

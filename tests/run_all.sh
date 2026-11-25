@@ -27,6 +27,7 @@ run tests/features.js "$OUT"
 run tests/case641.js "$OUT"
 run tests/overlay.js "$OUT"
 run tests/fixes.js
+run tests/align.js
 [ -n "${M02_DIR:-}" ] && run tests/m02.js "$M02_DIR" "$OUT"
 run tests/dist.js   # 會先重新打包 dist/CourtTask.html
 grep -q . /dev/null

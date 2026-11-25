@@ -280,7 +280,7 @@
       Promise.all(files.map(function (f) { return readFile(f).then(function (b) { return { name: f.name, data: DXF.parse(DXF.decodeBytes(b)) }; }); }))
         .then(function (list) {
           var replace = true;
-          if (App.cad && App.cad.lines.length) replace = confirm('目前方案已經有圖資。\n按「確定」= 取代現有圖資\n按「取消」= 合併加入（套疊，例如另加分割線 DXF）');
+          if (App.cad && App.cad.lines.length) replace = confirm('目前方案已經有圖資。\n按「確定」= 取代現有圖資\n按「取消」= 合併加入（套疊，例如另加分割方案圖；座標不同時會依地籍線自動對位）');
           var old = replace ? { name: '', lines: [], texts: [], arcs: [] } : App.cad;
           var cad = { name: old.name, lines: old.lines.slice(), texts: old.texts.slice(), arcs: (old.arcs || []).slice() };
           if (replace) { App.P.segStyle = {}; App.P.textOver = {}; App.P.splits = {}; }
@@ -288,8 +288,10 @@
           var seen = {};
           function key(x1, y1, x2, y2) { return [x1, y1, x2, y2].map(function (v) { return Math.round(v * 1000); }).join(','); }
           cad.lines.forEach(function (l, i) { seen[key(l.x1, l.y1, l.x2, l.y2)] = i; seen[key(l.x2, l.y2, l.x1, l.y1)] = i; });
-          var dup = 0;
+          var dup = 0, alignMsg = [];
+          var prev = App.cad && App.cad.lines.length ? App.cad : null;   // 取代時仍以原圖的座標為準
           list.forEach(function (it) {
+            alignMsg.push(autoAlign(it, prev, cad, replace));
             it.data.lines.forEach(function (l) {
               var k = key(l.x1, l.y1, l.x2, l.y2), j = seen[k];
               if (j != null) { dup++; if (cad.lines[j].layer === '0' && l.layer !== '0') cad.lines[j] = l; return; }
@@ -312,10 +314,49 @@
           if (hv.split && !hv.case) App.P.activeOv = 'split';
           if (hv.case && !hv.split) App.P.activeOv = 'case';
           refreshAll(); changed();
-          toast('已匯入 ' + list.map(function (x) { return x.name; }).join('、') + '（線 ' + App.cad.lines.length + '，文字 ' + App.cad.texts.length + (dup ? '，略過重複線 ' + dup : '') + '）', 4000);
+          alignMsg = alignMsg.filter(Boolean);
+          toast('已匯入 ' + list.map(function (x) { return x.name; }).join('、') + '（線 ' + App.cad.lines.length + '，文字 ' + App.cad.texts.length + (dup ? '，略過重複線 ' + dup : '') + '）' +
+            (alignMsg.length ? '\n' + alignMsg.join('\n') : ''), alignMsg.length ? 9000 : 4000);
           switchTab('layer');
         }).catch(function (e) { console.error(e); alert('匯入失敗：' + (e && e.message || e)); });
     });
+  }
+
+  /* 自動套疊：新檔的座標（TWD67、圖紙 mm、任意原點、旋轉）和現有地籍圖不同時，
+     依兩邊的地籍線找出縮放、旋轉、平移套上去；再把重複的地籍線、地號去掉，只留一份。
+     回傳要顯示給使用者的一句話（同座標時回傳空字串） */
+  function autoAlign(it, prev, cad, replace) {
+    var P = App.P, d = it.data;
+    var isPar = function (l) { return R.roleOf(P, l.layer, 'line', l.color) === 'parcel'; };
+    var isNo = function (t) { var r = R.roleOf(P, t.layer, 'text'); return r === 'parcelNo' || r === 'target'; };
+    var refLines = cad.lines.concat(replace && prev ? prev.lines : []), refTexts = cad.texts.concat(replace && prev ? prev.texts : []);
+    if (!refLines.length) return '';
+    var rp = refLines.filter(isPar), ip = d.lines.filter(isPar);
+    var ref = { lines: rp.length >= 10 ? rp : refLines, texts: refTexts.filter(isNo) };
+    var inc = { lines: ip.length >= 10 ? ip : d.lines, texts: d.texts.filter(isNo) };
+    var r = null, msg = '';
+    var pts = function (ls) { return G.bbox([].concat.apply([], ls.map(function (l) { return [[l.x1, l.y1], [l.x2, l.y2]]; }))); };
+    var a = pts(d.lines.length ? d.lines : [{ x1: 0, y1: 0, x2: 0, y2: 0 }]), b = pts(ref.lines), pad = 1500;
+    var apart = a[2] < b[0] - pad || a[0] > b[2] + pad || a[3] < b[1] - pad || a[1] > b[3] + pad;
+    var twCoord = a[0] > 140000 && a[2] < 360000 && a[1] > 2380000 && a[3] < 2820000;
+    // 「取代」成另一個案件（同樣是台灣坐標、但相距很遠）就不必比對
+    if (replace && !cad.lines.length && apart && twCoord) return '';
+    try { r = Align.fit(ref, inc); } catch (e) { console.error(e); }
+    if (r && r.T) {
+      Align.apply(r.T, d);
+      msg = '「' + it.name + '」座標和現有地籍圖不同，已依地籍線自動套疊：縮放 ×' + (+r.scale.toPrecision(6)) +
+        '、旋轉 ' + r.rotDeg.toFixed(4) + '°，對上 ' + r.matched + ' 個界址點，誤差 ' + (r.rms * 100).toFixed(1) + ' cm';
+      it.aligned = { scale: r.scale, rotDeg: r.rotDeg, matched: r.matched, rms: r.rms, T: r.T };
+    } else if (!r && !replace) {
+      if (a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3])
+        msg = '⚠「' + it.name + '」和現有地籍圖對不上（可能不是同一個地區，或檔案裡沒有地籍線），照原座標加入';
+    }
+    // 吸附與去重只對「合併加入」時已在圖上的資料做；取代時舊圖不保留
+    // 吸附距離跟著套疊誤差走：資料精確時只吸 3 mm 內（不會把離界址點幾公分的分割點吸走），手繪的最多 5 cm
+    var snapTol = r && r.T ? Math.min(0.05, Math.max(0.003, 3 * r.rms)) : 0.001;
+    if (cad.lines.length) Align.snap(cad.lines, d, snapTol);
+    if (cad.texts.length) d.texts = Align.dedupTexts(cad.texts, d.texts, 2, r ? isNo : null);   // 確定是同一地區才依地號去重
+    return msg;
   }
 
   function centerMap(m, how) {
